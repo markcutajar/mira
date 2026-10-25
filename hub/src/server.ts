@@ -3,6 +3,7 @@
 // events or answer a prompt. Live updates go to the browser as Server-Sent Events.
 
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { CONTRACT_VERSION, MiraEvent } from '../../contracts/src/index.ts';
@@ -18,6 +19,8 @@ export interface HubOptions {
   permissionWaitMs: number;
   recordShape?: (source: string, payload: HookPayload, bytes: number) => void;
   onEvent?: (event: MiraEvent) => void;
+  /** A display title for a session, read from its transcript on demand. */
+  titleFor?: (transcript: string | undefined) => string | undefined;
 }
 
 interface Viewer {
@@ -28,6 +31,8 @@ interface Viewer {
 const MAX_BODY = 16 * 1024 * 1024;
 const CLOCK_SKEW_MS = 10 * 60 * 1000;
 const HEARTBEAT_MS = 25 * 1000;
+const BOARD = new URL('../web/board.html', import.meta.url);
+const BOARD_POLICY = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'";
 
 export function createHub(options: HubOptions) {
   const { store, colony } = options;
@@ -43,12 +48,14 @@ export function createHub(options: HubOptions) {
     for (const viewer of viewers.values()) viewer.res.write(message);
   }
 
+  const sessions = () => colony.snapshot().map((s) => ({ ...s, title: options.titleFor?.(s.transcript) }));
+
   function record(event: MiraEvent | null) {
     if (!event || !store.add(event)) return;
     colony.apply(event);
     options.onEvent?.(event);
     broadcast('event', event);
-    broadcast('sessions', colony.snapshot());
+    broadcast('sessions', sessions());
   }
 
   function eventFrom(payload: HookPayload, at: Date): MiraEvent | null {
@@ -96,7 +103,7 @@ export function createHub(options: HubOptions) {
   function stream(req: IncomingMessage, res: ServerResponse, url: URL) {
     const id = randomUUID();
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    res.write(sse('hello', { viewer: id }) + sse('sessions', colony.snapshot()) + sse('pending', permissions.pending()));
+    res.write(sse('hello', { viewer: id, waitSeconds: options.permissionWaitMs / 1000 }) + sse('sessions', sessions()) + sse('pending', permissions.pending()));
     viewers.set(id, { res, visible: url.searchParams.get('visible') !== '0' });
     req.on('close', () => viewers.delete(id));
   }
@@ -112,8 +119,12 @@ export function createHub(options: HubOptions) {
   async function answer(req: IncomingMessage, res: ServerResponse, id: string) {
     const body = parseObject(await readBody(req));
     const decision = body?.decision;
-    if (decision !== 'allow' && decision !== 'deny') return reply(res, 400, 'Expected { decision: "allow" | "deny" }.');
-    if (!permissions.answer(id, decision)) return reply(res, 404, 'That prompt is no longer waiting.');
+    if (decision !== 'allow' && decision !== 'deny' && decision !== 'terminal') return reply(res, 400, 'Expected { decision: "allow" | "deny" | "terminal" }.');
+    const waiting = permissions.pending().some((p) => p.id === id);
+    if (!waiting) return reply(res, 404, 'That prompt is no longer waiting.');
+    // "terminal" hands the prompt back at once, so the normal terminal prompt appears.
+    if (decision === 'terminal') permissions.cancel(id);
+    else permissions.answer(id, decision);
     res.writeHead(204).end();
   }
 
@@ -125,12 +136,12 @@ export function createHub(options: HubOptions) {
     const prompt = url.pathname.match(/^\/api\/prompts\/([\w-]+)$/);
     if (route === 'POST /ingest/claude-code') return void ingest(req, res);
     if (route === 'POST /hooks/permission') return void permission(req, res);
-    if (route === 'GET /api/sessions') return json(res, { sessions: colony.snapshot(), pending: permissions.pending() });
+    if (route === 'GET /api/sessions') return json(res, { sessions: sessions(), pending: permissions.pending(), waitSeconds: options.permissionWaitMs / 1000 });
     if (route === 'GET /api/events') return json(res, store.recent(clamp(Number(url.searchParams.get('limit') ?? 100), 1, 500)));
     if (route === 'GET /api/stream') return stream(req, res, url);
     if (route === 'POST /api/presence') return void presence(req, res);
     if (req.method === 'POST' && prompt?.[1]) return void answer(req, res, prompt[1]);
-    if (route === 'GET /') return home(res, colony.snapshot().length);
+    if (route === 'GET /') return board(res);
     reply(res, 404, 'Not found.');
   });
 
@@ -204,10 +215,10 @@ function reply(res: ServerResponse, status: number, message: string) {
   res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' }).end(message);
 }
 
-function home(res: ServerResponse, sessions: number) {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(
-    `<!doctype html><meta charset="utf-8"><title>Mira hub</title><body style="font:15px system-ui;background:#0b0d1a;color:#ece8d9;padding:24px">` +
-    `<h1 style="font-size:20px">Mira hub is running</h1><p>${sessions} session${sessions === 1 ? '' : 's'} in view. The status board arrives in step 3.</p>` +
-    `<p>Live data: <a style="color:#ffd34d" href="/api/sessions">/api/sessions</a> · <a style="color:#ffd34d" href="/api/events">/api/events</a></p></body>`,
-  );
+// Read on every request, so `npm run dev` picks up board changes without a restart.
+function board(res: ServerResponse) {
+  readFile(BOARD, (err, html) => {
+    if (err) return reply(res, 500, `The status board is missing: ${err.message}`);
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': BOARD_POLICY }).end(html);
+  });
 }

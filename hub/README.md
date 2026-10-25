@@ -8,6 +8,8 @@ Receives Claude Code hook events, keeps the live picture of every session, and a
 npm start        # or: npm run dev, which restarts when the code changes
 ```
 
+Then open `http://127.0.0.1:4711` for the status board: sessions grouped by project with their live status, the event stream, and prompts waiting for an answer. While the board is open and on screen with "Answer prompts here" ticked, permission prompts wait there for up to 60 seconds before the terminal asks. Session titles are read from the transcripts when the board needs them, and never stored.
+
 On startup it rebuilds today's picture from stored events, then reads recent Claude Code transcripts to find sessions that ran while it was stopped. Everything it keeps is in `~/.mira`:
 
 | Path | What |
@@ -52,13 +54,14 @@ The `PreToolUse` entry is repeated for `SessionStart`, `UserPromptSubmit`, `Stop
 
 | Request | Use |
 |---|---|
+| `GET /` | The status board |
 | `POST /ingest/claude-code` | Hook events from the background commands |
 | `POST /hooks/permission` | Permission prompts, held for an answer while Mira is open |
 | `GET /api/sessions` | Live sessions and prompts waiting for an answer |
 | `GET /api/events?limit=100` | The most recent events |
 | `GET /api/stream` | Live updates as Server-Sent Events. Add `?visible=0` for a viewer that isn't on screen. |
 | `POST /api/presence` | `{ "viewer", "visible" }`: whether a viewer is on screen |
-| `POST /api/prompts/:id` | `{ "decision": "allow" }` or `"deny"` |
+| `POST /api/prompts/:id` | `{ "decision": "allow" }`, `"deny"`, or `"terminal"` to hand the prompt back to the terminal at once |
 
 ## Safety
 

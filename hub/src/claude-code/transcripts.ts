@@ -3,7 +3,7 @@
 // skipped, never thrown. Only metadata is read here: session, folder, time and turn state.
 
 import { closeSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { Status } from '../../../contracts/src/index.ts';
 
 export interface TranscriptSession {
@@ -49,6 +49,39 @@ export function lastState(tail: string, transcript: string): TranscriptSession |
     return { sessionId, cwd, lastAt: timestamp, status: finished ? 'my-turn' : 'working', transcript };
   }
   return null;
+}
+
+/** True when `file` lies inside `dir`. On Windows, a file on another drive is never inside. */
+export function isInside(dir: string, file: string): boolean {
+  const rel = relative(resolve(dir), resolve(file));
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+const titles = new Map<string, { mtimeMs: number; title: string | undefined }>();
+
+/** The session's latest title, as Claude Code wrote it into the transcript. Read on demand and cached in memory, never stored. */
+export function sessionTitle(transcript: string): string | undefined {
+  try {
+    const stat = statSync(transcript);
+    const cached = titles.get(transcript);
+    if (cached && cached.mtimeMs === stat.mtimeMs) return cached.title;
+    const title = latestTitle(readTail(transcript, stat.size));
+    titles.set(transcript, { mtimeMs: stat.mtimeMs, title });
+    return title;
+  } catch {
+    return undefined;
+  }
+}
+
+export function latestTitle(tail: string): string | undefined {
+  const lines = tail.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const entry = parse(lines[i]);
+    if (entry?.type !== 'ai-title' || typeof entry.aiTitle !== 'string') continue;
+    const title = entry.aiTitle.trim();
+    return title ? title.slice(0, 80) : undefined;
+  }
+  return undefined;
 }
 
 function list(dir: string): string[] {

@@ -2,7 +2,7 @@
 
 import { join } from 'node:path';
 import type { MiraEvent } from '../../contracts/src/index.ts';
-import { activeSessions } from './claude-code/transcripts.ts';
+import { activeSessions, isInside, sessionTitle } from './claude-code/transcripts.ts';
 import { Colony } from './colony.ts';
 import { claudeProjects, loadConfig, miraHome } from './config.ts';
 import { createHub } from './server.ts';
@@ -29,6 +29,8 @@ const hub = createHub({
   permissionWaitMs: config.permissionWaitSeconds * 1000,
   recordShape: config.recordShapes ? shapeRecorder(join(miraHome, 'recordings')) : undefined,
   onEvent: (event) => console.log(describe(event)),
+  // Transcript paths arrive in hook payloads, so only files under Claude Code's own folder are ever read.
+  titleFor: (transcript) => (transcript && isInside(claudeProjects, transcript) ? sessionTitle(transcript) : undefined),
 });
 
 hub.server.on('error', (err: NodeJS.ErrnoException) => {

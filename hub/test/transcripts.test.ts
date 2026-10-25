@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
-import { activeSessions, lastState } from '../src/claude-code/transcripts.ts';
+import { activeSessions, isInside, lastState, latestTitle } from '../src/claude-code/transcripts.ts';
 
 const line = (entry: Record<string, unknown>) => JSON.stringify(entry);
 const msg = (type: 'user' | 'assistant', sessionId: string, timestamp: string, extra: Record<string, unknown> = {}) =>
@@ -29,6 +29,27 @@ describe('lastState', () => {
 
   it('returns nothing for a transcript it cannot read', () => {
     assert.equal(lastState('not json\n{"type":"summary"}', 't.jsonl'), null);
+  });
+});
+
+describe('latestTitle', () => {
+  it('takes the most recent title Claude Code wrote', () => {
+    const tail = [line({ type: 'ai-title', aiTitle: 'First idea', sessionId: 's-1' }), msg('user', 's-1', '2026-10-25T18:00:00.000Z'), line({ type: 'ai-title', aiTitle: '  Mira hub status board  ', sessionId: 's-1' })].join('\n');
+    assert.equal(latestTitle(tail), 'Mira hub status board');
+  });
+
+  it('caps long titles and copes with none', () => {
+    assert.equal(latestTitle(line({ type: 'ai-title', aiTitle: 'x'.repeat(200) }))?.length, 80);
+    assert.equal(latestTitle(msg('user', 's-1', '2026-10-25T18:00:00.000Z')), undefined);
+  });
+});
+
+describe('isInside', () => {
+  it('only accepts files under the folder', () => {
+    const projects = join(tmpdir(), 'claude', 'projects');
+    assert.equal(isInside(projects, join(projects, 'mira', 's-1.jsonl')), true);
+    assert.equal(isInside(projects, join(projects, '..', 'settings.json')), false);
+    assert.equal(isInside(projects, projects), false);
   });
 });
 
