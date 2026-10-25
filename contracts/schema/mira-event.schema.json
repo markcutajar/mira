@@ -1,0 +1,228 @@
+{
+  "title": "Mira event (contract v1)",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "v": {
+      "type": "number",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "claude-code"
+      ]
+    },
+    "system": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "actor": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "session",
+            "subagent"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "parent": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "session.started",
+        "session.moved",
+        "session.ended",
+        "prompt.submitted",
+        "turn.ended",
+        "turn.waiting",
+        "turn.failed",
+        "tool.started",
+        "tool.finished",
+        "tool.failed",
+        "permission.requested",
+        "permission.answered",
+        "permission.denied",
+        "subagent.started",
+        "subagent.stopped",
+        "notification",
+        "usage.reported"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "working",
+        "needs-me",
+        "my-turn",
+        "failed",
+        "ended"
+      ]
+    },
+    "detail": {
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "notification": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny"
+          ]
+        },
+        "answeredBy": {
+          "type": "string",
+          "enum": [
+            "mira",
+            "terminal"
+          ]
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "interrupted": {
+          "type": "boolean"
+        },
+        "permissionMode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "previousCwd": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "additionalProperties": false
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cacheReadTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cacheWriteTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "contextTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "costUsd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "estimated": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ref": {
+      "type": "object",
+      "properties": {
+        "transcript": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "subagentTranscript": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "promptId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "toolUseId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "v",
+    "id",
+    "at",
+    "source",
+    "system",
+    "actor",
+    "type"
+  ],
+  "additionalProperties": false
+}
