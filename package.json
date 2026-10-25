@@ -7,8 +7,10 @@
     "node": ">=24"
   },
   "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning hub/src/main.ts",
+    "dev": "node --disable-warning=ExperimentalWarning --watch hub/src/main.ts",
     "typecheck": "tsc -p .",
-    "test": "node --test \"contracts/test/*.test.ts\"",
+    "test": "node --disable-warning=ExperimentalWarning --test \"contracts/test/*.test.ts\" \"hub/test/*.test.ts\"",
     "contract:schema": "node contracts/scripts/emit-schema.ts",
     "recorder": "node tools/hook-recorder/recorder.mjs"
   },

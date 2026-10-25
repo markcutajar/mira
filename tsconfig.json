@@ -13,5 +13,5 @@
     "erasableSyntaxOnly": true,
     "skipLibCheck": true
   },
-  "include": ["contracts/**/*.ts"]
+  "include": ["contracts/**/*.ts", "hub/**/*.ts"]
 }

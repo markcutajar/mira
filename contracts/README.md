@@ -3,7 +3,7 @@
 **Draft, version 1.** Every source's events are normalised to one envelope, so the hub, the status board and the sky only ever handle one shape.
 
 - **Source of truth:** [src/envelope.ts](src/envelope.ts), written with Zod. It gives the hub TypeScript types and runtime validation from one definition.
-- **For other languages:** [schema/mira-event.schema.json](schema/mira-event.schema.json) is the same envelope as JSON Schema. Regenerate it with `npm run contract:schema`. The tests fail while it is stale.
+- **For other languages:** [schema/mira-event.schema.json](schema/mira-event.schema.json) is the same envelope as JSON Schema, for any client outside TypeScript. Regenerate it with `npm run contract:schema`. The tests fail while it is stale.
 - **Claude Code mapping:** [src/claude-code.ts](src/claude-code.ts), the table the hub's normaliser applies.
 
 ## The envelope
