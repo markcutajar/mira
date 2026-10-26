@@ -3,8 +3,9 @@
 
 import type { MiraEvent } from '../../../contracts/src/index.ts';
 import { sessionLabel, type BoardSession } from '../shared/format.ts';
-import { ACCENT_COLOUR, ACCENTS, MAX_LEVEL, names, type Accent, type Art, type HouseStyle, type Palette } from './art.ts';
-import { findPath, generateCells, hash, SEC, sectionOrigin, spotsAround, templateBuildings, type BuildingType, type Cell, type Spot, type Template } from './world.ts';
+import { ACCENT_COLOUR, ACCENTS, MAX_LEVEL, names, type Accent, type Art, type Decoration, type HouseStyle, type Palette } from './art.ts';
+import { arrange, BUILDING_LABEL, edit, isItem, ITEMS, move, placeOf, restyle, sameLayouts, type ItemKind, type Outcome, type Placed, type SectionLayout, type Tool } from './build.ts';
+import { findPath, generateCells, hash, SEC, sectionOrigin, spotsAround, type BuildingType, type Cell, type Spot, type Template } from './world.ts';
 
 type Status = 'working' | 'needs-me' | 'my-turn' | 'failed' | 'ended';
 type Image = Phaser.GameObjects.Image;
@@ -89,11 +90,26 @@ export interface SkyOptions {
   onSection?(name: string): void;
   /** The zoom level changed: its name, and whether it can go closer or further. */
   onZoom?(name: string, closer: boolean, further: boolean): void;
+  /** I changed a project's layout in build mode (decision 39). */
+  onLayout?(name: string, layout: SectionLayout): void;
+  /** What build mode has to say: what the tool does, or why a click didn't work. */
+  onBuildHint?(text: string): void;
 }
+
+/** A tile inside a section's hedge, as build mode sees it. */
+interface Target {
+  sec: Section;
+  place: string;
+  cell: Cell;
+  building?: Building;
+}
+
+// Where a placed picture stands on its tile, in art pixels below the tile's centre.
+const ITEM_DROP: Partial<Record<ItemKind, number>> = { tree: 3, 'tree-apple': 3, shrub: 2, lamp: 2, bench: 3 };
+const buildingIndex = (b: Building) => Number(b.id.split(':')[1]);
 
 // Tools that read go to the library; everything else is made in the workshop.
 const READING = new Set(['Read', 'Grep', 'Glob', 'LS', 'WebFetch', 'WebSearch', 'ToolSearch', 'NotebookRead']);
-const HOUSE_STYLES: HouseStyle[] = ['brick', 'timber', 'stone'];
 const DPR = () => Math.min(window.devicePixelRatio || 1, 3);
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
@@ -125,6 +141,13 @@ export class SkyScene extends Phaser.Scene {
   #drag: { x: number; y: number; sx: number; sy: number; moved: boolean } | null = null;
   #lastWheel = 0;
   #needsIdx = -1;
+  /** How I arranged each project's section, and where its buildings stand as a result (decision 39). */
+  #layouts: Record<string, SectionLayout> = {};
+  #placements = new Map<string, Placed[]>();
+  #build: { on: boolean; tool: Tool; picked: Building | null } = { on: false, tool: 'tree', picked: null };
+  #undo: Array<{ name: string; layout: SectionLayout | undefined }> = [];
+  #cursor!: Image;
+  #ghost!: Image;
 
   constructor(options: SkyOptions) {
     super({ key: 'sky' });
@@ -203,6 +226,51 @@ export class SkyScene extends Phaser.Scene {
     if (this.#ready && this.#sections.length) this.#setZoom(0);
   }
 
+  // -- build mode (decision 39) --
+
+  /** How I arranged each project's section, as the hub keeps it. Safe to call before the scene starts. */
+  setLayouts(layouts: Record<string, SectionLayout>): void {
+    if (sameLayouts(layouts, this.#layouts)) return; // the hub passing my own change back
+    this.#layouts = structuredClone(layouts);
+    if (this.#ready && this.#sections.length) this.#rearrange();
+  }
+
+  /** Turns build mode on or off: while on, clicks arrange the island instead of opening stories. */
+  setBuild(on: boolean): void {
+    this.#build.on = on;
+    this.#pick(null);
+    this.#cursor?.setVisible(false);
+    this.#ghost?.setVisible(false);
+    if (on) this.#hint(this.#toolHint());
+  }
+
+  setTool(tool: Tool): void {
+    this.#build.tool = tool;
+    this.#pick(null);
+    this.#ghost?.setVisible(false);
+    this.#hint(this.#toolHint());
+  }
+
+  /** Takes back my last change; false when there's nothing left to take back. */
+  undo(): boolean {
+    const last = this.#undo.pop();
+    if (!last) return false;
+    this.#setLayout(last.name, last.layout ?? {}, false);
+    this.#hint('Taken back.');
+    return true;
+  }
+
+  get canUndo(): boolean {
+    return this.#undo.length > 0;
+  }
+
+  /** A picture of what a tool places, for the palette; null until the art is drawn, or for tools that place nothing. */
+  preview(tool: Tool): string | null {
+    if (!this.#ready) return null;
+    const key = tool === 'path' ? names.tile('path') : tool === 'grass' ? names.tile('grass0') : isItem(tool) ? this.#itemLook(tool).key : null;
+    return key ? this.textures.getBase64(key) : null;
+  }
+
   /** Lays the camera out again after the page's panels change size, such as the side panel folding away. */
   relayout(): void {
     if (!this.#ready || !this.#sections.length) return;
@@ -239,6 +307,8 @@ export class SkyScene extends Phaser.Scene {
     for (const key of this.textures.getTextureKeys()) if (!before.has(key)) this.#artKeys.add(key);
     this.#drawBackdrop();
     this.#selectMark = this.add.image(0, 0, names.select).setVisible(false);
+    this.#cursor = this.add.image(0, 0, names.cursor(true)).setVisible(false);
+    this.#ghost = this.add.image(0, 0, names.cursor(true)).setVisible(false).setAlpha(0.6);
     this.#hoverLabel = this.#label('', { fontFamily: '"IBM Plex Sans", sans-serif', fontSize: '12px', color: '#ece8d9', backgroundColor: '#0b0d1add', padding: { x: 6, y: 3 } }).setVisible(false).setDepth(600002); // above the section labels
     this.#setupInput();
     this.scale.on('resize', this.#onResize, this);
@@ -380,6 +450,8 @@ export class SkyScene extends Phaser.Scene {
     for (const obj of this.#ground) obj.destroy();
     this.#ground = [];
     this.#cells = generateCells(this.#order.map((name) => this.#templates.get(name) ?? 'code'));
+    this.#placements.clear();
+    this.#order.forEach((name, i) => this.#placements.set(name, arrange(this.#cells, i, this.#templates.get(name) ?? 'code', this.#layouts[name])));
     const { h, side } = this.#art.tile;
     const A = this.#art.scale;
     const fresh: Image[] = [];
@@ -395,6 +467,9 @@ export class SkyScene extends Phaser.Scene {
         deco = this.add.image(x, y, key).setOrigin(a.ox, a.oy).setDepth(y);
       } else if (cell.ch === 'T') {
         deco = this.add.image(x, y + 3 * A, names.tree(hash(cell.c, cell.r, 4) < 0.4)).setOrigin(0.5, 1).setDepth(y + 3 * A);
+      } else if (cell.item && isItem(cell.item)) {
+        const look = this.#itemLook(cell.item);
+        deco = this.add.image(x, y + look.drop, look.key).setOrigin(look.ox, look.oy).setDepth(y + look.drop);
       }
       if (deco) this.#ground.push(deco);
       if (animate && !known.has(`${cell.c},${cell.r}`)) fresh.push(tile, ...(deco ? [deco] : []));
@@ -434,12 +509,11 @@ export class SkyScene extends Phaser.Scene {
     const accent = ACCENTS[i % ACCENTS.length] as Accent;
     const A = this.#art.scale;
     const sec: Section = { i, name, accent, template, buildings: [], houses: [], anchor: { x: 0, y: 0 }, label: null as unknown as Text, summary: null as unknown as Text };
-    for (const tb of templateBuildings(i, template)) {
+    for (const tb of this.#placements.get(name) ?? arrange(new Map(), i, template)) {
       const { x, y } = this.#tileXY(tb.c, tb.r);
-      const style = HOUSE_STYLES[Math.floor(hash(tb.c, tb.r, 5) * HOUSE_STYLES.length)] as HouseStyle;
       const img = this.add.image(x, y, names.select).setDepth(y);
       const spots = spotsAround(tb, this.#walkable);
-      const b: Building = { ...tb, x, y, top: y, img, spots, door: spots[0] ?? tb, style, residents: 0, level: 1 };
+      const b: Building = { ...tb, x, y, top: y, img, spots, door: spots[0] ?? tb, residents: 0, level: 1 };
       if (b.type === 'workshop' || b.type === 'library') {
         img.setInteractive({ pixelPerfect: true });
         img.on('pointerover', () => { this.#hoveredBuilding = b; });
@@ -829,6 +903,133 @@ export class SkyScene extends Phaser.Scene {
     this.#setZoom(this.#zoomIdx, undefined, true);
   }
 
+  // -- build mode, inside --
+
+  #itemLook(kind: ItemKind): { key: string; ox: number; oy: number; drop: number } {
+    const A = this.#art.scale;
+    const drop = (ITEM_DROP[kind] ?? 0) * A;
+    if (kind === 'tree' || kind === 'tree-apple') return { key: names.tree(kind === 'tree-apple'), ox: 0.5, oy: 1, drop };
+    const key = names.item(kind as Decoration);
+    const a = this.#art.anchor(key);
+    return { key, ox: a.ox, oy: a.oy, drop };
+  }
+
+  // A layout changed: the ground is laid again and the buildings go to their places, while
+  // mirlings carry on from wherever they are.
+  #rearrange(): void {
+    this.#buildGround(false);
+    for (const sec of this.#sections) {
+      const placed = this.#placements.get(sec.name) ?? [];
+      for (const b of sec.buildings) {
+        const p = placed.find((x) => x.id === b.id);
+        if (!p) continue;
+        const { x, y } = this.#tileXY(p.c, p.r);
+        Object.assign(b, { c: p.c, r: p.r, x, y, style: p.style });
+        b.img.setPosition(x, y).setDepth(y);
+        this.#fitBuilding(b);
+      }
+      for (const b of sec.buildings) {
+        b.spots = spotsAround(b, this.#walkable);
+        b.door = b.spots[0] ?? b;
+      }
+    }
+  }
+
+  #setLayout(name: string, layout: SectionLayout, remember: boolean): void {
+    if (remember) this.#undo.push({ name, layout: this.#layouts[name] });
+    this.#layouts = { ...this.#layouts, [name]: layout };
+    this.#rearrange();
+    this.#options.onLayout?.(name, layout);
+  }
+
+  #tileUnder(p: Phaser.Input.Pointer): Spot {
+    const point = this.cameras.main.getWorldPoint(p.x, p.y);
+    const { w, h } = this.#art.tile;
+    const u = point.x / (w / 2);
+    const v = point.y / (h / 2);
+    return { c: Math.round((u + v) / 2), r: Math.round((v - u) / 2) };
+  }
+
+  #target(spot: Spot): Target | null {
+    const where = placeOf(spot.c, spot.r, this.#sections.length);
+    const sec = where ? this.#sections[where.i] : undefined;
+    const cell = this.#cells.get(`${spot.c},${spot.r}`);
+    if (!where || !sec || !cell) return null;
+    return { sec, place: where.place, cell, building: sec.buildings.find((b) => b.c === spot.c && b.r === spot.r) };
+  }
+
+  /** What the current tool would do on a tile: a new layout, a building picked up, or why not. */
+  #outcome(t: Target): Outcome | { pick: Building } {
+    const { tool, picked } = this.#build;
+    const layout = this.#layouts[t.sec.name];
+    if (tool === 'move') {
+      if (!picked) return t.building ? { pick: t.building } : { refused: 'Click a building to pick it up.' };
+      if (t.building === picked) return { pick: picked };
+      if (!t.sec.buildings.includes(picked)) return { refused: "A building stays in its own project's section." };
+      return move(layout, buildingIndex(picked), t.cell, t.place);
+    }
+    if (tool === 'restyle') {
+      if (t.building?.type !== 'house') return { refused: 'Only houses come in other styles.' };
+      return restyle(layout, buildingIndex(t.building), t.building.style);
+    }
+    if (t.building) return { refused: tool === 'remove' ? 'Buildings stay, since they stand for real work. Move them instead.' : 'A building stands here.' };
+    return edit(layout, tool, t.cell, t.place);
+  }
+
+  #buildHover(p: Phaser.Input.Pointer): void {
+    const spot = this.#tileUnder(p);
+    const t = this.#target(spot);
+    const result = t ? this.#outcome(t) : null;
+    const ok = Boolean(result && !('refused' in result));
+    if (!this.#cells.has(`${spot.c},${spot.r}`)) {
+      this.#cursor.setVisible(false);
+      this.#ghost.setVisible(false);
+      return;
+    }
+    const { x, y } = this.#tileXY(spot.c, spot.r);
+    this.#cursor.setTexture(names.cursor(ok)).setPosition(x, y).setDepth(-100000 + spot.c + spot.r + 0.5).setVisible(true);
+    const { tool } = this.#build;
+    if (ok && isItem(tool)) {
+      const look = this.#itemLook(tool);
+      this.#ghost.setTexture(look.key).setOrigin(look.ox, look.oy).setPosition(x, y + look.drop).setDepth(y + look.drop + 0.5).setVisible(true);
+    } else {
+      this.#ghost.setVisible(false);
+    }
+  }
+
+  #buildClick(p: Phaser.Input.Pointer): void {
+    const t = this.#target(this.#tileUnder(p));
+    if (!t) return this.#hint("Only inside a project's hedge: the coast and the paths between sections stay as they are.");
+    const result = this.#outcome(t);
+    if ('pick' in result) return this.#pick(result.pick === this.#build.picked ? null : result.pick);
+    if ('refused' in result) return this.#hint(result.refused);
+    this.#pick(null);
+    this.#setLayout(t.sec.name, result.layout, true);
+    this.#hint(this.#toolHint());
+  }
+
+  #pick(b: Building | null): void {
+    this.#build.picked?.img.clearTint();
+    this.#build.picked = b;
+    b?.img.setTint(0xffe08a);
+    if (b) this.#hint(`Now click a free tile for the ${BUILDING_LABEL[b.type]}, or click it again to put it back.`);
+    else if (this.#build.on) this.#hint(this.#toolHint());
+  }
+
+  #hint(text: string): void {
+    this.#options.onBuildHint?.(text);
+  }
+
+  #toolHint(): string {
+    const { tool } = this.#build;
+    if (tool === 'move') return 'Click a building, then a free tile in its section.';
+    if (tool === 'restyle') return 'Click a house to change its style.';
+    if (tool === 'remove') return 'Click a plant or decoration to take it away.';
+    if (tool === 'path' || tool === 'grass') return `Click tiles inside a hedge to make them ${tool}.`;
+    const label = ITEMS[tool].label.toLowerCase();
+    return `Click a free tile inside a hedge to place ${/^[aeiou]/.test(label) ? 'an' : 'a'} ${label}.`;
+  }
+
   #setupInput(): void {
     const cam = this.cameras.main;
     this.input.topOnly = false;
@@ -836,7 +1037,12 @@ export class SkyScene extends Phaser.Scene {
       cam.panEffect.reset();
       this.#drag = { x: p.x, y: p.y, sx: cam.scrollX, sy: cam.scrollY, moved: false };
     });
+    this.input.on('gameout', () => {
+      this.#cursor.setVisible(false);
+      this.#ghost.setVisible(false);
+    });
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      if (this.#build.on && !p.isDown) this.#buildHover(p);
       if (!this.#drag || !p.isDown) return;
       const dx = p.x - this.#drag.x;
       const dy = p.y - this.#drag.y;
@@ -846,8 +1052,11 @@ export class SkyScene extends Phaser.Scene {
         cam.scrollY = this.#drag.sy - dy / cam.zoom;
       }
     });
-    this.input.on('pointerup', (_p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
-      if (this.#drag && !this.#drag.moved) {
+    this.input.on('pointerup', (p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
+      if (this.#drag && !this.#drag.moved && this.#build.on) {
+        this.#buildClick(p);
+        this.#buildHover(p);
+      } else if (this.#drag && !this.#drag.moved) {
         const id = over.map((o) => o.getData('session') as string | undefined).find(Boolean);
         const section = over.map((o) => o.getData('section') as string | undefined).find(Boolean);
         if (id) this.#options.onSelect(id);

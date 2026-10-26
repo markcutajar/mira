@@ -2,10 +2,11 @@
 // session's story on the right. A session row or a mirling opens its story; a project's name on
 // either side finds it on the other.
 
-import { clock, esc, projectLabel } from '../shared/format.ts';
+import { clock, esc, projectLabel, toast } from '../shared/format.ts';
 import { connectLive } from '../shared/live.ts';
 import { createPanel, linkedSession } from '../shared/panel.ts';
 import { drawnArt } from './drawn-art.ts';
+import { createPalette } from './palette.ts';
 import { SkyScene } from './scene.ts';
 import { createSidebar } from './sidebar.ts';
 
@@ -18,6 +19,8 @@ const toggle = $<HTMLButtonElement>('side-toggle');
 const skyEl = $('sky');
 const zoomIn = $<HTMLButtonElement>('zoom-in');
 const zoomOut = $<HTMLButtonElement>('zoom-out');
+const buildToggle = $<HTMLButtonElement>('build-toggle');
+let building = false;
 
 const sideShown = () => !hud.classList.contains('folded');
 const openPanel = () => document.querySelector<HTMLElement>('.panel:not([hidden])');
@@ -28,7 +31,7 @@ const scene = new SkyScene({
     top: $('hud-top').getBoundingClientRect().bottom + 8,
     bottom: window.innerHeight - $('hud-bottom').getBoundingClientRect().top,
     left: sideShown() ? side.getBoundingClientRect().right + 8 : 0,
-    right: openPanel()?.getBoundingClientRect().width ?? 0,
+    right: openPanel()?.getBoundingClientRect().width ?? (building ? window.innerWidth - $('palette').getBoundingClientRect().left : 0),
   }),
   onSelect: (id) => panel.open(id),
   onSection: (name) => {
@@ -40,6 +43,24 @@ const scene = new SkyScene({
     zoomIn.disabled = !closer;
     zoomOut.disabled = !further;
   },
+  // Each change in build mode is kept by the hub as it's made (decision 39).
+  onLayout: (name, layout) => {
+    palette.canUndo(scene.canUndo);
+    fetch(`/api/layouts/${encodeURIComponent(name)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(layout) })
+      .then(async (res) => { if (!res.ok) toast((await res.text()) || `The hub couldn't keep that change (${res.status}).`); })
+      .catch(() => toast("The hub isn't reachable, so that change wasn't kept."));
+  },
+  onBuildHint: (text) => palette.hint(text),
+});
+
+const palette = createPalette($('palette'), {
+  preview: (tool) => scene.preview(tool),
+  onTool: (tool) => scene.setTool(tool),
+  onUndo: () => {
+    scene.undo();
+    palette.canUndo(scene.canUndo);
+  },
+  onDone: () => setBuild(false),
 });
 
 const panel = createPanel({
@@ -48,6 +69,7 @@ const panel = createPanel({
   waitSeconds: () => live.waitSeconds,
   projectLabel: (system) => projectLabel(system, live.systems),
   onChange: (id) => {
+    if (id) setBuild(false); // a story takes the place of the palette
     scene.select(id);
     if (id) scene.reveal(id);
     else scene.showIsland(); // closing a story goes back to the whole island
@@ -63,6 +85,7 @@ const live = connectLive({
   onSystems: () => { syncScene(); sidebar.render(); panel.refresh(); },
   onSessions: () => { syncScene(); renderCounts(); sidebar.render(); panel.refresh(); },
   onPending: () => { renderCounts(); sidebar.render(); panel.refresh(); },
+  onLayouts: () => scene.setLayouts(live.layouts),
   onEvent: (event) => { scene.event(event); panel.event(event); },
   onEvents: renderEvents,
 });
@@ -129,6 +152,22 @@ $('chip-needs').addEventListener('click', () => {
   const id = scene.focusNextNeeds();
   if (id) panel.open(id);
 });
+// Build mode (decision 39): the palette opens where the story would, and clicks arrange the island.
+function setBuild(on: boolean) {
+  if (on === building) return;
+  building = on;
+  buildToggle.setAttribute('aria-pressed', String(on));
+  if (on && panel.current()) panel.close();
+  palette.show(on);
+  scene.setBuild(on);
+  palette.canUndo(scene.canUndo);
+  requestAnimationFrame(() => scene.relayout()); // make room for the palette, or give it back
+}
+buildToggle.addEventListener('click', () => setBuild(!building));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && building && !(e.target as HTMLElement).closest('input, textarea, .term-host')) setBuild(false);
+});
+
 zoomIn.addEventListener('click', () => scene.zoomBy(1));
 zoomOut.addEventListener('click', () => scene.zoomBy(-1));
 

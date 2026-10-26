@@ -16,6 +16,7 @@ import type { SourceAdapter } from './sources.ts';
 import type { Kind, Store } from './store.ts';
 import type { Place } from './systems.ts';
 import type { Terminals } from './terminals.ts';
+import { emptyLayout, SectionLayout } from './layout.ts';
 import { serveWeb, webFile } from './web.ts';
 
 type Payload = Record<string, unknown>;
@@ -135,7 +136,7 @@ export function createHub(options: HubOptions) {
   function stream(req: IncomingMessage, res: ServerResponse, url: URL) {
     const id = randomUUID();
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    res.write(sse('hello', { viewer: id, waitSeconds: options.permissionWaitMs / 1000 }) + sse('systems', systems()) + sse('sessions', sessions()) + sse('pending', permissions.pending()));
+    res.write(sse('hello', { viewer: id, waitSeconds: options.permissionWaitMs / 1000 }) + sse('layouts', layouts) + sse('systems', systems()) + sse('sessions', sessions()) + sse('pending', permissions.pending()));
     viewers.set(id, { res, visible: url.searchParams.get('visible') !== '0' });
     req.on('close', () => viewers.delete(id));
   }
@@ -246,6 +247,19 @@ export function createHub(options: HubOptions) {
     broadcast('sessions', sessions());
   }
 
+  // Build mode (decision 39): how I arranged each project's section, the same in every browser.
+  const layouts = store.layouts();
+  async function arrange(req: IncomingMessage, res: ServerResponse, system: string) {
+    const parsed = SectionLayout.safeParse(parseObject(await readBody(req)));
+    if (!parsed.success) return reply(res, 400, 'Expected a section layout: ground, placed, removed, moved and styles, inside the hedge.');
+    const layout = emptyLayout(parsed.data) ? null : parsed.data;
+    store.setLayout(system, layout);
+    if (layout) layouts[system] = layout;
+    else delete layouts[system];
+    res.writeHead(204).end();
+    broadcast('layouts', layouts);
+  }
+
   const server = createServer((req, res) => {
     const port = (server.address() as AddressInfo).port;
     if (!fromThisMachine(req, port)) return reply(res, 403, 'Mira only accepts requests from this machine.');
@@ -258,6 +272,7 @@ export function createHub(options: HubOptions) {
     const editorOf = req.method === 'GET' || req.method === 'POST' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/editor$/)?.[1] : undefined;
     const manage = req.method === 'PUT' || req.method === 'POST' ? url.pathname.match(/^\/api\/(names|remove)\/(system|session)\/([^/]{1,240})$/) : null;
     const startOf = req.method === 'GET' || req.method === 'POST' ? url.pathname.match(/^\/api\/systems\/([^/]{1,240})\/start$/)?.[1] : undefined;
+    const layoutOf = req.method === 'PUT' ? url.pathname.match(/^\/api\/layouts\/([^/]{1,240})$/)?.[1] : undefined;
     if (ingestFor?.ingest) return void ingest(req, res, ingestFor);
     if (route === 'POST /hooks/permission') return void permission(req, res);
     if (route === 'GET /api/sessions') return json(res, { sessions: sessions(), pending: permissions.pending(), waitSeconds: options.permissionWaitMs / 1000 });
@@ -270,6 +285,8 @@ export function createHub(options: HubOptions) {
     if (route === 'POST /api/presence') return void presence(req, res);
     if (req.method === 'POST' && prompt?.[1]) return void answer(req, res, prompt[1]);
     if (route === 'GET /api/systems') return json(res, { systems: systems() });
+    if (route === 'GET /api/layouts') return json(res, { layouts });
+    if (layoutOf) return void arrange(req, res, decodeName(layoutOf));
     if (manage) return void change(req, res, manage[1] as 'names' | 'remove', manage[2] as Kind, decodeName(manage[3] as string));
     const served = req.method === 'GET' ? webFile(url.pathname) : undefined;
     if (served) return void serveWeb(res, served);

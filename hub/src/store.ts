@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import type { MiraEvent } from '../../contracts/src/index.ts';
+import type { SectionLayout } from './layout.ts';
 
 /** What I can rename or remove from view: a project (system) or a session. */
 export type Kind = 'system' | 'session';
@@ -22,6 +23,9 @@ export class Store {
   #removed: StatementSync;
   #remove: StatementSync;
   #prune: StatementSync;
+  #layouts: StatementSync;
+  #setLayout: StatementSync;
+  #clearLayout: StatementSync;
 
   constructor(file: string) {
     if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
@@ -44,6 +48,8 @@ export class Store {
       -- My own names for projects and sessions, and what I removed from view and when (decision 30).
       CREATE TABLE IF NOT EXISTS names (kind TEXT NOT NULL, key TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (kind, key));
       CREATE TABLE IF NOT EXISTS removed (kind TEXT NOT NULL, key TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (kind, key));
+      -- How I arranged each project's section of the island in build mode (decision 39).
+      CREATE TABLE IF NOT EXISTS layouts (system TEXT PRIMARY KEY, layout TEXT NOT NULL);
     `);
     this.#insert = this.#db.prepare('INSERT OR IGNORE INTO events (id, at, source, system, actor_id, type, status, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     this.#recent = this.#db.prepare('SELECT body FROM events ORDER BY seq DESC LIMIT ?');
@@ -56,6 +62,9 @@ export class Store {
     this.#clearName = this.#db.prepare('DELETE FROM names WHERE kind = ? AND key = ?');
     this.#removed = this.#db.prepare('SELECT key, at FROM removed WHERE kind = ?');
     this.#remove = this.#db.prepare('INSERT INTO removed (kind, key, at) VALUES (?, ?, ?) ON CONFLICT (kind, key) DO UPDATE SET at = excluded.at');
+    this.#layouts = this.#db.prepare('SELECT system, layout FROM layouts');
+    this.#setLayout = this.#db.prepare('INSERT INTO layouts (system, layout) VALUES (?, ?) ON CONFLICT (system) DO UPDATE SET layout = excluded.layout');
+    this.#clearLayout = this.#db.prepare('DELETE FROM layouts WHERE system = ?');
     this.#prune = this.#db.prepare("DELETE FROM events WHERE at < ? AND type != 'usage.reported'");
     this.#folders = this.#db.prepare("SELECT json_extract(body, '$.detail.cwd') AS cwd FROM events WHERE system = ? AND type != 'session.moved' AND cwd IS NOT NULL GROUP BY cwd ORDER BY MAX(at) DESC LIMIT ?");
   }
@@ -96,6 +105,17 @@ export class Store {
   setName(kind: Kind, key: string, name: string): void {
     if (name) this.#setName.run(kind, key, name);
     else this.#clearName.run(kind, key);
+  }
+
+  /** How I arranged each project's section, by project. */
+  layouts(): Record<string, SectionLayout> {
+    return Object.fromEntries(this.#layouts.all().map((row) => [String(row.system), JSON.parse(String(row.layout)) as SectionLayout]));
+  }
+
+  /** Keeps a project's layout; null forgets it. */
+  setLayout(system: string, layout: SectionLayout | null): void {
+    if (layout) this.#setLayout.run(system, JSON.stringify(layout));
+    else this.#clearLayout.run(system);
   }
 
   /** When each project or session was removed from view, by key. */

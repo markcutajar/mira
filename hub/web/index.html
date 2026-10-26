@@ -102,6 +102,25 @@
   #events .type { color: var(--thronglet); }
   #events li:nth-child(n+5) { display: none; }
 
+  .corner { display: flex; align-items: flex-end; gap: 8px; margin-left: auto; }
+  .build { height: 38px; padding: 0 14px; color: var(--ink); font: 13px var(--font-display); cursor: pointer; }
+  .build[aria-pressed="true"] { border-color: var(--thronglet); color: var(--thronglet); }
+
+  /* Build mode's palette (decision 39), where the story would open. */
+  .palette { margin-left: auto; align-self: flex-start; width: 270px; max-height: 100%; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .palette[hidden] { display: none; }
+  .palette-head { display: flex; justify-content: space-between; align-items: center; }
+  .palette-head h2 { margin: 0; font: 600 18px var(--font-display); }
+  .palette-group .eyebrow { margin: 0 0 6px; }
+  .tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .tool { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 8px; background: transparent; border: 2px solid var(--hull-edge); color: var(--ink); font: 12px var(--font-display); text-align: left; cursor: pointer; }
+  .tool:hover { background: rgba(255, 255, 255, 0.04); }
+  .tool[aria-pressed="true"] { border-color: var(--thronglet); background: rgba(255, 211, 77, 0.1); }
+  .tool img { width: 30px; height: 30px; object-fit: contain; image-rendering: pixelated; flex: none; }
+  .palette-hint { margin: 0; min-height: 2.6em; color: var(--ink); }
+  .palette-foot { display: flex; align-items: center; gap: 10px; }
+  .palette-foot .hint { margin: 0; font-size: 11px; }
+
   .zoom { display: flex; align-items: center; }
   .zoom button { width: 38px; height: 34px; background: transparent; border: 0; color: var(--ink); font: 20px/1 var(--font-display); cursor: pointer; }
   .zoom button:disabled { color: var(--hull-edge); cursor: default; }
@@ -142,16 +161,20 @@
   <aside class="sidebar glass" id="sidebar" aria-label="Projects and sessions"></aside>
   <div class="hud-middle">
     <p class="empty glass" id="empty" hidden>No projects yet. Start a Claude Code session in any repo and it arrives as a new section of the island.</p>
+    <aside class="palette glass" id="palette" aria-label="Build" hidden></aside>
   </div>
   <footer class="hud-bottom" id="hud-bottom">
     <section class="stream glass" aria-label="Event stream">
       <div class="stream-head"><h2 class="eyebrow">Event stream</h2><span class="hint">Click a session or a mirling for its story · click a project's name to find it</span></div>
       <ol id="events"></ol>
     </section>
-    <div class="zoom glass" role="group" aria-label="Zoom">
-      <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
-      <span id="zoom-label">Everything</span>
-      <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+    <div class="corner">
+      <button type="button" class="build glass" id="build-toggle" aria-pressed="false" aria-controls="palette" title="Arrange each project's section: plants, decorations, paths, and where its buildings stand">Build</button>
+      <div class="zoom glass" role="group" aria-label="Zoom">
+        <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
+        <span id="zoom-label">Everything</span>
+        <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+      </div>
     </div>
   </footer>
 </div>

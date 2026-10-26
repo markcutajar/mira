@@ -9,6 +9,7 @@ const PITCH = SEC + GAP;
 
 export type Template = 'code';
 export type BuildingType = 'house' | 'library' | 'workshop';
+export type HouseStyle = 'brick' | 'timber' | 'stone';
 
 export interface Spot {
   c: number;
@@ -20,6 +21,8 @@ export interface Cell extends Spot {
   ch: string;
   section: number | null;
   walk: boolean;
+  /** A plant or decoration placed in build mode (decision 39). */
+  item?: string;
 }
 
 export interface TemplateBuilding extends Spot {

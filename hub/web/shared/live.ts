@@ -3,6 +3,7 @@
 // wait for an answer while someone is watching (decision 18).
 
 import type { MiraEvent } from '../../../contracts/src/index.ts';
+import type { SectionLayout } from '../../src/layout.ts';
 import type { BoardSession, PendingPrompt } from './format.ts';
 
 /** A project, as the island lays it out: in the order it first appeared, with my name for it if I gave one. */
@@ -23,6 +24,8 @@ export interface Live {
   events: MiraEvent[];
   waitSeconds: number;
   connected: boolean;
+  /** How I arranged each project's section in build mode (decision 39). */
+  layouts: Record<string, SectionLayout>;
 }
 
 export interface LiveOptions {
@@ -32,6 +35,7 @@ export interface LiveOptions {
   onSystems?(): void;
   onSessions?(): void;
   onPending?(): void;
+  onLayouts?(): void;
   /** A new event, as it happens. */
   onEvent?(event: MiraEvent): void;
   /** The list of recent events changed, from a new event or from history. */
@@ -42,7 +46,7 @@ const HOLD_KEY = 'mira.answerHere';
 const EVENTS_KEPT = 80;
 
 export function connectLive(options: LiveOptions): Live {
-  const live: Live = { systems: [], sessions: [], pending: [], events: [], waitSeconds: 60, connected: false };
+  const live: Live = { systems: [], sessions: [], pending: [], events: [], waitSeconds: 60, connected: false, layouts: {} };
   let viewer: string | null = null;
   let hold = true;
   try { hold = localStorage.getItem(HOLD_KEY) !== 'off'; } catch { /* storage unavailable: default on */ }
@@ -85,6 +89,10 @@ export function connectLive(options: LiveOptions): Live {
   stream.addEventListener('pending', (e) => {
     live.pending = JSON.parse((e as MessageEvent).data) as PendingPrompt[];
     options.onPending?.();
+  });
+  stream.addEventListener('layouts', (e) => {
+    live.layouts = JSON.parse((e as MessageEvent).data) as Record<string, SectionLayout>;
+    options.onLayouts?.();
   });
   stream.addEventListener('event', (e) => {
     const event = JSON.parse((e as MessageEvent).data) as MiraEvent;

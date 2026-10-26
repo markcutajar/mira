@@ -5,6 +5,8 @@
 // frames to these names in `create` (scene.textures can add frames under any key), and give each
 // building-like picture an anchor. Then pass it to the scene instead of `drawnArt()`.
 
+import type { HouseStyle } from './world.ts';
+
 /** Hedge and label colours, one per section in turn. */
 export type Accent = 'y' | 'l' | 'o' | 'c' | 'p' | 'g';
 export const ACCENTS: Accent[] = ['y', 'c', 'l', 'o', 'p', 'g'];
@@ -13,8 +15,9 @@ export const ACCENT_COLOUR: Record<Accent, string> = { y: '#ffd34d', l: '#c8a6ff
 /** Creature colours: yellow, and grey when failed. */
 export type Palette = 'y' | 'g';
 export type Frame = 'a' | 'b';
-export type HouseStyle = 'brick' | 'timber' | 'stone';
+export type { HouseStyle };
 export type TileKind = 'grass0' | 'grass1' | 'grass2' | 'flowers' | 'path' | 'water';
+export type Decoration = 'shrub' | 'flowerbed' | 'lamp' | 'bench' | 'statue';
 export const MAX_LEVEL = 5;
 
 export const names = {
@@ -24,6 +27,10 @@ export const names = {
   house: (style: HouseStyle, lit: boolean) => `house.${style}.${lit ? 'lit' : 'dark'}`,
   /** Libraries and workshops grow taller with their level, 1 to MAX_LEVEL. */
   building: (type: 'library' | 'workshop', level: number) => `${type}.${level}`,
+  /** Plants and decorations placed in build mode (decision 39); placed trees use `tree`. */
+  item: (kind: Decoration) => `item.${kind}`,
+  /** The tile under the pointer in build mode: green where the tool can work, red where it can't. */
+  cursor: (ok: boolean) => (ok ? 'cursor.ok' : 'cursor.bad'),
   creature: (palette: Palette, frame: Frame) => `creature.${palette}.${frame}`,
   helper: (palette: Palette, frame: Frame) => `helper.${palette}.${frame}`,
   beacon: 'beacon',

@@ -255,6 +255,114 @@ export function drawnArt(): Art {
     });
   }
 
+  function isoBlock(ctx: Ctx, cx: number, gy: number, hw: number, wallH: number, left: string, right: string, top: string) {
+    const bottoms = bottomsFor(cx, gy, hw);
+    for (let x = cx - hw; x < cx + hw; x++) rect(ctx, x < cx ? left : right, x, (bottoms[x] ?? 0) - wallH + 1, 1, wallH);
+    diamond(ctx, top, cx, gy - wallH, hw);
+  }
+
+  // Build mode's plants and decorations (decision 39), from the sky mockup.
+  function decorations() {
+    const shrubRnd = mulberry32(13 + A);
+    const blobs: Array<[number, number, number]> = [[7 * A, 5.5 * A, 5 * A], [4 * A, 7 * A, 3.5 * A], [10 * A, 7 * A, 3.5 * A]];
+    const inShrub = (x: number, y: number) => blobs.some(([bx, by, br]) => Math.hypot(x + 0.5 - bx, y + 0.5 - by) <= br);
+    canvasTex(names.item('shrub'), 14 * A, 11 * A, (ctx) => {
+      const w = 14 * A;
+      const h = 11 * A;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          if (!inShrub(x, y)) continue;
+          const edge = !inShrub(x - 1, y) || !inShrub(x + 1, y) || !inShrub(x, y - 1) || !inShrub(x, y + 1);
+          const light = (x + y) / (w + h) + shrubRnd() * 0.1;
+          rect(ctx, edge ? '#24552a' : light < 0.4 ? '#62b84f' : light < 0.7 ? '#3f8f3a' : '#2d6b2b', x, y, 1, 1);
+        }
+      }
+      for (let i = 0; i < 5 * A; i++) {
+        const x = Math.floor(shrubRnd() * w);
+        const y = Math.floor(shrubRnd() * h);
+        if (inShrub(x, y) && inShrub(x + A, y + A)) rect(ctx, '#ff9ec7', x, y, A, A);
+      }
+    });
+
+    const bedRnd = mulberry32(31 + A);
+    const hw = 12 * A;
+    const wallH = 3 * A;
+    const bedW = hw * 2 + 2;
+    const bedH = hw + wallH + 4 * A;
+    anchors.set(names.item('flowerbed'), { ox: (hw + 1) / bedW, oy: (bedH - hw / 2) / bedH, height: bedH - hw / 2 });
+    canvasTex(names.item('flowerbed'), bedW, bedH, (ctx) => {
+      const cx = hw + 1;
+      const gy = bedH - hw / 2;
+      isoBlock(ctx, cx, gy, hw, wallH, '#8a5a32', '#6b4423', '#4a2e1c');
+      for (let i = 0; i < 16 * A; i++) {
+        const x = Math.floor(bedRnd() * hw * 2) - hw;
+        const y = Math.floor(bedRnd() * hw) - hw / 2;
+        if (Math.abs(x + 0.5) / hw + Math.abs(y + 0.5) / (hw / 2) > 0.7) continue;
+        rect(ctx, '#3f8530', cx + x, gy - wallH + y + A, A, A);
+        rect(ctx, pick(C.flowers, bedRnd), cx + x, gy - wallH + y, A, A);
+      }
+    });
+
+    canvasTex(names.item('lamp'), 6 * A, 20 * A, (ctx) => {
+      const h = 20 * A;
+      rect(ctx, 'rgba(255,224,138,0.22)', 0, A, 6 * A, 6 * A);
+      rect(ctx, '#2a2f45', A, A, 4 * A, A);
+      rect(ctx, '#2a2f45', A, 2 * A, 4 * A, 4 * A);
+      rect(ctx, '#ffe08a', 2 * A, 3 * A, 2 * A, 2 * A);
+      rect(ctx, '#2a2f45', 3 * A - Math.floor(A / 2), 6 * A, A, h - 8 * A);
+      rect(ctx, '#2a2f45', 2 * A, h - 2 * A, 2 * A, 2 * A);
+    });
+
+    canvasTex(names.item('bench'), 14 * A, 14 * A, (ctx) => {
+      const len = 12 * A;
+      const y0 = 5 * A;
+      for (let x = 0; x < len; x++) {
+        const y = y0 + Math.floor(x / 2);
+        rect(ctx, '#8a5a32', x + A, y - 3 * A, 1, A);
+        rect(ctx, '#c48a58', x + A, y, 1, A);
+        rect(ctx, '#8a5a32', x + A, y + A, 1, A);
+      }
+      for (const x of [A, len - A]) {
+        const y = y0 + Math.floor((x - A) / 2);
+        rect(ctx, '#4a2e1c', x, y + 2 * A, A, 2 * A);
+        rect(ctx, '#4a2e1c', x, y - 3 * A, A, 3 * A);
+      }
+    });
+
+    // A golden mirling on a stone plinth.
+    const map = MAPS.creature.a;
+    const cw = map[0]?.length ?? 18;
+    const ch = map.length;
+    const phw = 8 * A;
+    const plinth = 7 * A;
+    const sw = Math.max(phw * 2 + 2, cw + 2);
+    const sh = ch + plinth + phw + 2 * A;
+    const gold: Record<string, string> = { o: '#6b4a12', y: '#ffcf3f', h: '#fff3b0', s: '#d9a21f', d: '#b07d12', e: '#6b4a12', w: '#fff3b0', m: '#6b4a12', k: '#ffcf3f', f: '#6b4a12' };
+    anchors.set(names.item('statue'), { ox: Math.floor(sw / 2) / sw, oy: (sh - phw / 2) / sh, height: sh - phw / 2 });
+    canvasTex(names.item('statue'), sw, sh, (ctx) => {
+      const cx = Math.floor(sw / 2);
+      const gy = sh - phw / 2;
+      isoBlock(ctx, cx, gy, phw, plinth, '#c9cbd6', '#9ea1ae', '#e2e4ec');
+      const top = gy - plinth - Math.floor(phw / 4) - ch + A;
+      map.forEach((row, y) => [...row].forEach((c, x) => { const color = gold[c]; if (color) rect(ctx, color, cx - Math.floor(cw / 2) + x, top + y, 1, 1); }));
+    });
+
+    for (const ok of [true, false]) {
+      const color = ok ? '#7bd389' : '#ff6b7a';
+      canvasTex(names.cursor(ok), TW, TH, (ctx) => {
+        const half = TW / 2;
+        const hh = TH / 2;
+        diamond(ctx, `${color}55`, half, hh, half);
+        for (let i = 0; i < hh; i++) {
+          const up = (i + 1) * 2;
+          const down = half - i * 2;
+          rect(ctx, color, half - up, i, A + 1, 1); rect(ctx, color, half + up - A - 1, i, A + 1, 1);
+          rect(ctx, color, half - down, hh + i, A + 1, 1); rect(ctx, color, half + down - A - 1, hh + i, A + 1, 1);
+        }
+      });
+    }
+  }
+
   function tiles() {
     const rnd = mulberry32(1234 + A);
     const tufts = (ctx: Ctx) => {
@@ -381,6 +489,7 @@ export function drawnArt(): Art {
       });
       ACCENTS.forEach((accent, i) => hedge(names.hedge(accent), ACCENT_COLOUR[accent], i + 1));
       buildings();
+      decorations();
     },
 
     anchor(key) {
