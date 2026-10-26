@@ -91,6 +91,7 @@
   .title { font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
   .mode { margin-left: 8px; padding: 0 6px; border: 1px solid var(--hull-edge); font: 11px var(--font-data); color: var(--dim); vertical-align: 2px; }
   .mode[data-mode="bypassPermissions"] { border-color: var(--failed); color: var(--failed); }
+  .mode.tree { border-color: var(--turn); color: var(--turn); }
   .meta { margin-top: 2px; font: 12px var(--font-data); color: var(--dim); overflow-wrap: anywhere; }
   .faint { color: var(--faint); }
   .helpers { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
@@ -276,6 +277,7 @@
     const status = s.status || 'unknown';
     const helpers = s.subagents.filter((a) => a.status === 'working');
     const mode = s.permissionMode && s.permissionMode !== 'default' ? `<span class="mode" data-mode="${esc(s.permissionMode)}">${esc(s.permissionMode)}</span>` : '';
+    const tree = s.worktree ? `<span class="mode tree" title="A git worktree of ${esc(s.system)}">worktree ${esc(s.worktree)}</span>` : '';
     const meta = [
       s.cwd ? `<span title="${esc(s.cwd)}">${esc(folder(s.cwd))}</span>` : '',
       s.lastTool ? `last ${esc(s.lastTool)}` : '',
@@ -285,7 +287,7 @@
     return `<div class="session" data-status="${esc(status)}">
       <span class="pill" data-status="${esc(status)}">${LABEL[s.status] ?? 'Unknown'}</span>
       <div>
-        <div class="title">${esc(label(s))}${mode}</div>
+        <div class="title">${esc(label(s))}${tree}${mode}</div>
         <div class="meta">${meta}</div>
         ${helpers.length ? `<div class="helpers">${helpers.map((a) => `<span class="helper">${esc(a.name || 'subagent')}</span>`).join('')}</div>` : ''}
       </div>

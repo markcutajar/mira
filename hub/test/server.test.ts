@@ -8,7 +8,7 @@ import { Store } from '../src/store.ts';
 
 const store = new Store(':memory:');
 const colony = new Colony();
-const hub = createHub({ store, colony, systemFor: () => 'mira', permissionWaitMs: 5000, titleFor: (t) => (t ? 'Hub work' : undefined) });
+const hub = createHub({ store, colony, placeFor: () => ({ system: 'mira' }), permissionWaitMs: 5000, titleFor: (t) => (t ? 'Hub work' : undefined) });
 let base = '';
 
 const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>

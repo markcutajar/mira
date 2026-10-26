@@ -32,7 +32,7 @@ On startup it rebuilds today's picture from stored events, then reads recent Cla
 }
 ```
 
-- `systems` renames or groups sections. Keys are repo folder names; giving two folders the same name puts them in one section.
+- `systems` renames or groups sections. Keys are repo folder names; giving two folders the same name puts them in one section. Git worktrees join their main repo's section on their own, labelled with the worktree's folder name, so they need no entry here.
 - `permissionWaitSeconds` is how long a prompt waits for Mira while Mira is open. Keep it below the `PermissionRequest` hook's timeout, which is 65 seconds.
 - `activeHours` is how recent a transcript must be for its session to count as running at startup.
 

@@ -8,24 +8,24 @@ import { claudeProjects, loadConfig, miraHome } from './config.ts';
 import { createHub } from './server.ts';
 import { shapeRecorder } from './shapes.ts';
 import { Store } from './store.ts';
-import { makeSystemResolver } from './systems.ts';
+import { makePlaceResolver } from './systems.ts';
 
 const HOUR = 60 * 60 * 1000;
 
 const config = loadConfig();
 const store = new Store(join(miraHome, 'mira.db'));
-const systemFor = makeSystemResolver(config.systems);
+const placeFor = makePlaceResolver(config.systems);
 const colony = new Colony();
 
 // Today's stored events first, then sessions that ran while the hub was stopped.
 for (const event of store.since(new Date(Date.now() - 24 * HOUR).toISOString())) colony.apply(event);
 const running = activeSessions(claudeProjects, Date.now() - config.activeHours * HOUR);
-colony.seed(running.map((s) => ({ ...s, system: systemFor(s.cwd) })));
+colony.seed(running.map((s) => ({ ...s, system: placeFor(s.cwd).system })));
 
 const hub = createHub({
   store,
   colony,
-  systemFor,
+  placeFor,
   permissionWaitMs: config.permissionWaitSeconds * 1000,
   recordShape: config.recordShapes ? shapeRecorder(join(miraHome, 'recordings')) : undefined,
   onEvent: (event) => console.log(describe(event)),

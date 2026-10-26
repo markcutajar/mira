@@ -10,7 +10,7 @@ describe('normalise', () => {
     const event = normalise({ ...base, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_use_id: 'toolu_1', duration_ms: 1840.4, tool_input: { command: 'cat .env' }, tool_response: { stdout: 'SECRET=1' } }, ctx);
     assert.equal(event?.type, 'tool.finished');
     assert.equal(event?.status, 'working');
-    assert.deepEqual(event?.detail, { tool: 'Bash', durationMs: 1840, permissionMode: 'default' });
+    assert.deepEqual(event?.detail, { tool: 'Bash', durationMs: 1840, permissionMode: 'default', cwd: base.cwd });
     assert.deepEqual(event?.ref, { transcript: base.transcript_path, promptId: 'p-1', toolUseId: 'toolu_1' });
     assert.doesNotMatch(JSON.stringify(event), /SECRET|cat \.env/);
   });

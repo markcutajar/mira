@@ -11,11 +11,12 @@ import { normalise, type HookPayload } from './claude-code/normalise.ts';
 import type { Colony } from './colony.ts';
 import { Permissions, summarise, type Decision } from './permissions.ts';
 import type { Store } from './store.ts';
+import type { Place } from './systems.ts';
 
 export interface HubOptions {
   store: Store;
   colony: Colony;
-  systemFor: (cwd: string | undefined) => string;
+  placeFor: (cwd: string | undefined) => Place;
   permissionWaitMs: number;
   recordShape?: (source: string, payload: HookPayload, bytes: number) => void;
   onEvent?: (event: MiraEvent) => void;
@@ -48,7 +49,7 @@ export function createHub(options: HubOptions) {
     for (const viewer of viewers.values()) viewer.res.write(message);
   }
 
-  const sessions = () => colony.snapshot().map((s) => ({ ...s, title: options.titleFor?.(s.transcript) }));
+  const sessions = () => colony.snapshot().map((s) => ({ ...s, title: options.titleFor?.(s.transcript), worktree: options.placeFor(s.cwd).worktree }));
 
   function record(event: MiraEvent | null) {
     if (!event || !store.add(event)) return;
@@ -60,7 +61,7 @@ export function createHub(options: HubOptions) {
 
   function eventFrom(payload: HookPayload, at: Date): MiraEvent | null {
     const cwd = typeof payload.new_cwd === 'string' ? payload.new_cwd : typeof payload.cwd === 'string' ? payload.cwd : undefined;
-    return normalise(payload, { at: at.toISOString(), system: options.systemFor(cwd) });
+    return normalise(payload, { at: at.toISOString(), system: options.placeFor(cwd).system });
   }
 
   async function ingest(req: IncomingMessage, res: ServerResponse) {

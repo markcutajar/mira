@@ -31,11 +31,11 @@
 
 ## Claude Code hooks
 
-Every event also keeps the session ID as `actor.id`, the transcript path as `ref.transcript` and the prompt ID as `ref.promptId` when the hook sends them.
+Every event also keeps the session ID as `actor.id`, the working directory as `detail.cwd`, the transcript path as `ref.transcript` and the prompt ID as `ref.promptId` when the hook sends them.
 
 | Hook | Event type | Status | Kept from the payload |
 |---|---|---|---|
-| `SessionStart` | `session.started` | `my-turn`, or unchanged after compaction | `source` as `reason`; `cwd`, permission mode; `context_tokens` and `estimated_cache_write_usd` as estimated usage |
+| `SessionStart` | `session.started` | `my-turn`, or unchanged after compaction | `source` as `reason`; permission mode; `context_tokens` and `estimated_cache_write_usd` as estimated usage |
 | `UserPromptSubmit` | `prompt.submitted` | `working` | Prompt ID only, never the prompt |
 | `PreToolUse` | `tool.started` | `working` | Tool name, tool-use ID |
 | `PostToolUse` | `tool.finished` | `working` | Tool name, duration |

@@ -43,7 +43,7 @@ export function normalise(payload: HookPayload, ctx: NormaliseContext): MiraEven
     durationMs: count(payload.duration_ms),
     interrupted: typeof payload.is_interrupt === 'boolean' ? payload.is_interrupt : undefined,
     permissionMode: label(payload.permission_mode),
-    cwd: hook === 'CwdChanged' ? path(payload.new_cwd) : hook === 'SessionStart' ? path(payload.cwd) : undefined,
+    cwd: path(hook === 'CwdChanged' ? payload.new_cwd : payload.cwd),
     previousCwd: hook === 'CwdChanged' ? path(payload.old_cwd) : undefined,
   });
 
