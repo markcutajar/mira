@@ -47,6 +47,7 @@ const EDITOR_DELAY_MS = 1500;
 const MAX_PROMPT = 1500;
 const CLOCK_SKEW_MS = 10 * 60 * 1000;
 const HEARTBEAT_MS = 25 * 1000;
+const CHANGES_MS = 5 * 1000;
 const SYSTEMS_DAYS = 14;
 
 export function createHub(options: HubOptions) {
@@ -215,9 +216,23 @@ export function createHub(options: HubOptions) {
       const body = parseObject(await readBody(req));
       const name = typeof body?.name === 'string' ? body.name.trim() : null;
       if (name === null || name.length > 80) return reply(res, 400, 'Expected { name }, up to 80 characters; an empty name goes back to the original.');
-      store.setName(kind, key, name);
-      if (name) names[kind][key] = name;
-      else delete names[kind][key];
+      const session = kind === 'session' ? roster.get(key) : undefined;
+      const source = session && sources.get(session.source);
+      if (session && source?.rename) {
+        // The source keeps this session's name, and Mira keeps none of its own (decision 37).
+        if (!name) return reply(res, 400, 'Give the session a name. Claude Code keeps it, and has no way back to the one it made up.');
+        try {
+          if (!source.rename(session, name)) return reply(res, 409, "Mira can't rename this session.");
+        } catch (error) {
+          return reply(res, 500, `Couldn't save the name: ${(error as Error).message}`);
+        }
+        store.setName(kind, key, '');
+        delete names[kind][key];
+      } else {
+        store.setName(kind, key, name);
+        if (name) names[kind][key] = name;
+        else delete names[kind][key];
+      }
     } else {
       if (req.method !== 'POST') return reply(res, 405, 'Remove with POST.');
       const at = new Date().toISOString();
@@ -259,13 +274,17 @@ export function createHub(options: HubOptions) {
     reply(res, 404, 'Not found.');
   });
 
-  // The heartbeat also notices sessions that left the view with no event to say so, such as ended
-  // ones once their few minutes are up.
+  // Every few seconds, notice changes no event announces: ended sessions leaving once their few
+  // minutes are up, or a session renamed in VS Code. The heartbeat keeps quiet connections open.
   let shown = '';
-  const heartbeat = setInterval(() => {
+  const watch = setInterval(() => {
+    if (!viewers.size) return void (shown = '');
     const now = JSON.stringify(sessions());
     if (shown && now !== shown) broadcast('sessions', JSON.parse(now));
     shown = now;
+  }, CHANGES_MS);
+  watch.unref();
+  const heartbeat = setInterval(() => {
     for (const viewer of viewers.values()) viewer.res.write(': ping\n\n');
   }, HEARTBEAT_MS);
   heartbeat.unref();
@@ -296,6 +315,7 @@ export function createHub(options: HubOptions) {
 
   function close() {
     clearInterval(heartbeat);
+    clearInterval(watch);
     terminals.closeAll();
     sockets.close();
     for (const viewer of viewers.values()) viewer.res.end();

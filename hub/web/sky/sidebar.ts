@@ -105,11 +105,11 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
       s.permissionMode && s.permissionMode !== 'default' ? `<span class="badge" data-mode="${esc(s.permissionMode)}">${esc(s.permissionMode)}</span>` : '',
     ].join('');
     const meta = [s.lastTool ? esc(s.lastTool) : '', `<span data-since="${esc(s.lastAt)}"></span>`, s.usage ? esc(cost(s.usage.costUsd)) : ''].filter(Boolean).join(' · ');
-    return `<li><button type="button" class="row${options.current() === s.id ? ' open' : ''}" data-session="${esc(s.id)}" data-status="${esc(status)}">
+    return `<li class="row-item"><button type="button" class="row${options.current() === s.id ? ' open' : ''}" data-session="${esc(s.id)}" data-status="${esc(status)}">
       <span class="dot" title="${esc(STATUS_LABEL[status] ?? 'Unknown')}"></span>
       <span class="row-title">${esc(sessionLabel(s))}${badges}</span>
       <span class="row-meta"><span class="row-status">${esc(STATUS_LABEL[status] ?? 'Unknown')}</span> · ${meta}</span>
-    </button></li>`;
+    </button><button type="button" class="ghost small row-rename" data-rename-session="${esc(s.id)}" title="Rename this session" aria-label="Rename ${esc(sessionLabel(s))}">✎</button></li>`;
   }
 
   // Relative times and countdowns move every second without redrawing.
@@ -145,6 +145,11 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
     if (menu) {
       if (!menus.delete(menu)) menus.add(menu);
       return render();
+    }
+    const renameSession = pick('rename-session');
+    if (renameSession) {
+      const s = live.sessions.find((x) => x.id === renameSession);
+      return void renameThing('session', renameSession, s ? sessionLabel(s) : renameSession);
     }
     const rename = pick('rename-system');
     if (rename) return void renameThing('system', rename, projectLabel(rename, live.systems));

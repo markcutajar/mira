@@ -1,18 +1,23 @@
-// Renaming and removing projects and sessions (decision 30). Names and removals are Mira's own:
-// nothing in Claude Code or the repos changes, and a removed item comes back once it's active again.
+// Renaming and removing projects and sessions (decision 30). A project's name and every removal are
+// Mira's own, and a removed item comes back once it's active again. A Claude Code session's name is
+// written where Claude Code keeps it, so VS Code shows it too (decision 37).
 
 import { showDialog } from './dialog.ts';
 import { esc, toast } from './format.ts';
 
 export type Kind = 'system' | 'session';
 const NOUN: Record<Kind, string> = { system: 'project', session: 'session' };
+const RENAME_HINT: Record<Kind, string> = {
+  system: 'Shown on the board and in the sky. Leave it empty to go back to the original name.',
+  session: 'Saved with the session, so Claude Code in VS Code and in the terminal shows it too.',
+};
 
 /** Asks for a new name; resolves once it's saved, or not. */
 export function renameThing(kind: Kind, key: string, current: string): Promise<void> {
   const box = showDialog(`Rename ${NOUN[kind]}`, `<form method="dialog" class="dialog-body">
     <header class="dialog-head"><h2>Rename this ${NOUN[kind]}</h2></header>
     <label class="dialog-field"><span class="eyebrow">Name</span><input type="text" maxlength="80" value="${esc(current)}"></label>
-    <p class="hint">Shown on the board and in the sky. Leave it empty to go back to the original name.</p>
+    <p class="hint">${RENAME_HINT[kind]}</p>
     <div class="actions"><button type="submit" class="go" value="save">Save</button><button type="submit" class="ghost" value="cancel">Cancel</button></div>
   </form>`);
   const input = box.querySelector('input') as HTMLInputElement;

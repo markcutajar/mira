@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -80,6 +80,18 @@ describe('Claude Code source', () => {
     assert.deepEqual(spec?.args.slice(-2), ['--resume', id]);
     assert.equal(spec?.title, 'claude --resume 673391f2');
     assert.equal(source.terminalFor?.({ ...session(transcript), id: 's-1 && del', cwd: 'C:\code\mira' }), null);
+  });
+
+  it('renames a session in its own transcript, and nowhere else', () => {
+    const id = '11111111-2222-4333-8444-555555555555';
+    const file = join(dir, 'project', `${id}.jsonl`);
+    writeFileSync(file, '');
+    assert.equal(source.rename?.({ ...session(file), id }, ' Fix\tthe hub \n'), true);
+    assert.equal(source.title?.({ ...session(file), id }), 'Fixthe hub');
+    assert.equal(source.rename?.({ ...session(file), id }, '   '), false); // no name
+    assert.equal(source.rename?.({ ...session(transcript), id }, 'x'), false); // another session's transcript
+    assert.equal(source.rename?.({ ...session(join(tmpdir(), `${id}.jsonl`)), id }, 'x'), false); // outside Claude Code's folder
+    assert.equal(source.rename?.({ ...session(join(dir, 'project', '99999999-2222-4333-8444-555555555555.jsonl')), id: '99999999-2222-4333-8444-555555555555' }, 'x'), false); // no transcript yet
   });
 
   it('makes valid, repeatable UUIDs', () => {

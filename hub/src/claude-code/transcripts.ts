@@ -2,7 +2,7 @@
 // Claude Code and changes between releases, so every read is defensive: anything unexpected is
 // skipped, never thrown. What it reads is held in memory for the panel and never stored.
 
-import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Status } from '../../../contracts/src/index.ts';
 import { summarise } from '../permissions.ts';
@@ -77,15 +77,48 @@ export function sessionTitle(transcript: string): string | undefined {
   }
 }
 
+/** The title Claude Code shows: the latest name the session was given, wherever, else the one Claude Code made up. */
 export function latestTitle(tail: string): string | undefined {
   const lines = tail.split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const entry = parse(lines[i]);
-    if (entry?.type !== 'ai-title' || typeof entry.aiTitle !== 'string') continue;
-    const title = entry.aiTitle.trim();
-    return title ? title.slice(0, 80) : undefined;
+  let named: string | undefined;
+  let made: string | undefined;
+  for (let i = lines.length - 1; i >= 0 && (named === undefined || made === undefined); i--) {
+    const line = lines[i] ?? '';
+    if (named === undefined && line.includes('"custom-title"')) {
+      const entry = parse(line);
+      if (entry?.type === 'custom-title' && typeof entry.customTitle === 'string') named = entry.customTitle.trim();
+    } else if (made === undefined && line.includes('"ai-title"')) {
+      const entry = parse(line);
+      if (entry?.type === 'ai-title' && typeof entry.aiTitle === 'string') made = entry.aiTitle.trim();
+    }
   }
-  return undefined;
+  const title = named || made;
+  return title ? title.slice(0, 80) : undefined;
+}
+
+/**
+ * Names a session the way Claude Code does when I rename it there (decision 37): a custom-title line
+ * at the end of the transcript, which a running Claude Code adopts before it next writes its own,
+ * and the custom-title.json it keeps in the session's folder for listing sessions quickly.
+ */
+export function writeTitle(transcript: string, sessionId: string, title: string): void {
+  const size = statSync(transcript).size;
+  const fresh = size === 0 || readLastByte(transcript, size) === 0x0a; // a cut-short last line gets one of its own
+  appendFileSync(transcript, `${fresh ? '' : '\n'}${JSON.stringify({ type: 'custom-title', customTitle: title, sessionId })}\n`);
+  const sidecar = join(dirname(transcript), sessionId, 'custom-title.json');
+  mkdirSync(dirname(sidecar), { recursive: true, mode: 0o700 });
+  writeFileSync(sidecar, JSON.stringify({ customTitle: title }), { mode: 0o600 });
+}
+
+function readLastByte(file: string, size: number): number | undefined {
+  const buffer = Buffer.alloc(1);
+  const fd = openSync(file, 'r');
+  try {
+    readSync(fd, buffer, 0, 1, size - 1);
+  } finally {
+    closeSync(fd);
+  }
+  return buffer[0];
 }
 
 // -- The story: what happened, turn by turn --

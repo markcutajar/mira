@@ -11,10 +11,12 @@ import { Store } from '../src/store.ts';
 import { WebSocket } from 'ws';
 
 // A stand-in for Claude Code, so these tests cover the hub and not transcript reading.
+const given = new Map<string, string>();
 const claude: SourceAdapter = {
   id: 'claude-code',
   ingest: (payload, at) => normalise(payload, { at: at.toISOString(), system: 'mira' }),
-  title: (s) => (s.transcript ? 'Hub work' : undefined),
+  title: (s) => given.get(s.id) ?? (s.transcript ? 'Hub work' : undefined),
+  rename: (s, name) => (s.transcript ? Boolean(given.set(s.id, name)) : false),
   story: (s, { helper }) => (s.transcript ? { sessionId: s.id, helperId: helper, usage: emptyUsage(), turns: [], earlier: 0 } : null),
   continueAt: (s) => (s.cwd ? { folder: s.cwd, link: `vscode://claude/open?session=${s.id}` } : null),
   // A harmless program stands in for `claude --resume`.
@@ -215,14 +217,16 @@ describe('hub server', () => {
     assert.deepEqual(systems[0]?.growth, { commits: 12, docs: 3, workshop: 2, library: 2 });
   });
 
-  it('renames projects and sessions, and goes back to their own names', async () => {
+  it('renames projects in Mira, and sessions where their source keeps the name', async () => {
     const put = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     assert.equal((await put('/api/names/system/mira', { name: ' Mira ' })).status, 204);
     assert.equal((await put('/api/names/session/s-5', { name: 'The hub' })).status, 204);
     const { systems } = (await (await fetch(`${base}/api/systems`)).json()) as { systems: Array<{ name: string; label?: string }> };
     assert.deepEqual(systems.map((s) => [s.name, s.label]), [['mira', 'Mira']]);
+    assert.equal(given.get('s-5'), 'The hub');
     assert.equal((await sessions()).sessions.find((s) => s.id === 's-5')?.title, 'The hub');
-    assert.equal((await put('/api/names/session/s-5', { name: '' })).status, 204);
+    assert.equal((await put('/api/names/session/s-5', { name: '' })).status, 400); // Claude Code has no way back
+    given.delete('s-5');
     assert.equal((await sessions()).sessions.find((s) => s.id === 's-5')?.title, 'Hub work');
     assert.equal((await put('/api/names/system/mira', { name: 'x'.repeat(81) })).status, 400);
     assert.equal((await post('/api/names/system/mira', { name: 'Mira' })).status, 405);

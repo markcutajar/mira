@@ -82,6 +82,8 @@ export interface SourceAdapter {
   followUp?(event: MiraEvent, emit: (event: MiraEvent) => void): void;
   /** A display title for a session. */
   title?(session: SessionView): string | undefined;
+  /** Renames a session where its source keeps names, so the source's own tools show it too (decision 37). False if it can't. */
+  rename?(session: SessionView, name: string): boolean;
   /** The session's story, or one helper's, for the panel. */
   story?(session: SessionView, options: { helper?: string; turns: number }): Story | null;
   /** Where to carry a session on in an editor: its folder, and a link that opens the session there. */

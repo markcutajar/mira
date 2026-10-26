@@ -1,9 +1,9 @@
 import { strict as assert } from 'node:assert';
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
-import { activeSessions, buildTurns, isInside, lastState, latestTitle, parseLines, readEntries, readStory } from '../src/claude-code/transcripts.ts';
+import { activeSessions, buildTurns, isInside, lastState, latestTitle, parseLines, readEntries, readStory, writeTitle } from '../src/claude-code/transcripts.ts';
 import { makeCostOf } from '../src/pricing.ts';
 import { conversation, lines, RESPONSE_USD, writeSession } from './fixtures.ts';
 
@@ -40,9 +40,35 @@ describe('latestTitle', () => {
     assert.equal(latestTitle(tail), 'Mira hub status board');
   });
 
+  it("prefers the latest name the session was given, even when Claude Code's own title comes after it", () => {
+    const tail = [
+      line({ type: 'custom-title', sessionId: 's-1', customTitle: 'Old name' }),
+      line({ type: 'custom-title', customTitle: 'MIRA building', sessionId: 's-1' }),
+      line({ type: 'ai-title', aiTitle: 'README.md in mira', sessionId: 's-1' }),
+    ].join('\n');
+    assert.equal(latestTitle(tail), 'MIRA building');
+    // An emptied name goes back to the made-up one, as Claude Code itself does.
+    assert.equal(latestTitle(`${tail}\n${line({ type: 'custom-title', customTitle: '', sessionId: 's-1' })}`), 'README.md in mira');
+  });
+
   it('caps long titles and copes with none', () => {
     assert.equal(latestTitle(line({ type: 'ai-title', aiTitle: 'x'.repeat(200) }))?.length, 80);
     assert.equal(latestTitle(msg('user', 's-1', '2026-10-25T18:00:00.000Z')), undefined);
+  });
+});
+
+describe('writeTitle', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mira-title-'));
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('names a session as Claude Code does, on a line of its own, with the title file beside it', () => {
+    const transcript = join(dir, 's-1.jsonl');
+    writeFileSync(transcript, `${line({ type: 'ai-title', aiTitle: 'Made up', sessionId: 's-1' })}\n{"type":"user","cut sho`);
+    writeTitle(transcript, 's-1', 'My name');
+    const last = readFileSync(transcript, 'utf8').split('\n').at(-2);
+    assert.deepEqual(JSON.parse(last ?? ''), { type: 'custom-title', customTitle: 'My name', sessionId: 's-1' });
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, 's-1', 'custom-title.json'), 'utf8')), { customTitle: 'My name' });
+    assert.equal(latestTitle(readFileSync(transcript, 'utf8')), 'My name');
   });
 });
 

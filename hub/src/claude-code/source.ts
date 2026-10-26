@@ -3,12 +3,14 @@
 // numbers only, so totals outlive Claude Code's own transcript clean-up.
 
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { basename } from 'node:path';
 import { CONTRACT_VERSION, MiraEvent, type Actor } from '../../../contracts/src/index.ts';
 import type { CostOf } from '../pricing.ts';
 import type { SourceAdapter } from '../sources.ts';
 import type { Place } from '../systems.ts';
 import { normalise } from './normalise.ts';
-import { activeSessions, helperAt, helpersOf, isInside, readStory, sessionTitle, turnsOf, type Turn } from './transcripts.ts';
+import { activeSessions, helperAt, helpersOf, isInside, readStory, sessionTitle, turnsOf, writeTitle, type Turn } from './transcripts.ts';
 
 export interface ClaudeCodeOptions {
   projectsDir: string;
@@ -96,6 +98,16 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
     title(session) {
       const transcript = inside(session.transcript);
       return transcript ? sessionTitle(transcript) : undefined;
+    },
+
+    // Written as Claude Code writes it, so Mira, VS Code and the terminal show the same name
+    // whichever of them I renamed the session in (decision 37).
+    rename(session, name) {
+      const transcript = inside(session.transcript);
+      const title = name.replace(/[\x00-\x1f\x7f-\x9f]/g, '').trim();
+      if (!transcript || !title || !SESSION_ID.test(session.id) || basename(transcript) !== `${session.id}.jsonl` || !existsSync(transcript)) return false;
+      writeTitle(transcript, session.id, title);
+      return true;
     },
 
     story(session, { helper, turns }) {

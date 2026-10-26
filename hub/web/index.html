@@ -78,6 +78,10 @@
   .row-title { grid-area: title; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row-meta { grid-area: meta; font: 11px var(--font-data); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row-status { color: var(--c); }
+  .row-item { position: relative; }
+  .row-rename { position: absolute; top: 4px; right: 4px; padding: 1px 7px; background: var(--hull); opacity: 0; }
+  .row-item:hover .row-rename, .row-rename:focus-visible { opacity: 1; }
+  @media (hover: none) { .row-rename { opacity: 1; } }
   .badge { margin-left: 6px; padding: 0 5px; border: 1px solid var(--hull-edge); font: 10px var(--font-data); color: var(--dim); vertical-align: 1px; }
   .badge.tree { border-color: var(--turn); color: var(--turn); }
   .badge[data-mode="bypassPermissions"] { border-color: var(--failed); color: var(--failed); }
