@@ -1,7 +1,7 @@
 // Placeholder pixel art, drawn in code at the detailed 2× size (decisions 14 and 25). Every
 // picture is registered under a name from art.ts, so an art pack can replace this module whole.
 
-import { ACCENT_COLOUR, ACCENTS, MAX_LEVEL, names, type Anchor, type Art, type HouseStyle, type Palette } from './art.ts';
+import { MAX_LEVEL, names, WATERFALL_FRAMES, type Anchor, type Art, type Edge, type HouseStyle, type Palette, type Point } from './art.ts';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -49,7 +49,47 @@ const MAPS = {
   beacon: ['....oooo....', '..ooOOOOoo..', '.ohOOOOOOOo.', '.ohOOwwOOOo.', 'oOOOOwwOOOOo', 'oOOOOwwOOOOo', 'oOOOOwwOOOOo', 'oOOOOwwOOOOo', 'oOOOOOOOOOOo', 'oOOOOwwOOOOo', '.oOOOwwOOOo.', '.oOOOOOOOOo.', '..ooOOOOoo..', '....oOOo....', '.....oo.....', '.....oo.....'],
   bubble: ['..oooooooooooo..', '.oWWWWWWWWWWWWo.', 'oWWWWWWWWWWWWWWo', 'oWWddWWddWWddWWo', 'oWWddWWddWWddWWo', 'oWWWWWWWWWWWWWWo', '.oWWWWWWWWWWWWo.', '..oooWWooooooo..', '....oWWo........', '....oWo.........', '....oo..........'],
   smoke: ['..gggg..', '.gGGGGg.', 'gGGhGGGg', 'gGhGGGGg', 'gGGGGGGg', 'gGGGGGgg', '.gGGGgg.', '..gggg..'],
+  // Dots go in at row 4, columns 4, 7 and 10.
+  thought: ['....oooo.oooo...', '..ooWWWWoWWWWoo.', '.oWWWWWWWWWWWWWo', 'oWWWWWWWWWWWWWWo', 'oWWWWWWWWWWWWWWo', '.oWWWWWWWWWWWWo.', '..ooWWWooWWWoo..', '....ooo..ooo....', '..oo............', '.oWWo...........', '..oo............', 'oo..............'],
+  book: {
+    a: ['oo......oo', 'oWoo..ooWo', 'oWWWooWWWo', 'oWllWWllWo', 'oWWWWWWWWo', 'oBBBBBBBBo', '.oooooooo.'],
+    b: ['oo...o..oo', 'oWoooWooWo', 'oWWWoWoWWo', 'oWllWoWlWo', 'oWWWWWWWWo', 'oBBBBBBBBo', '.oooooooo.'],
+  },
+  hammer: ['oooooo', 'oGGGHo', 'oGGGGo', 'oooooo', '..ob..', '..ob..', '..ob..', '..ob..', '..ob..', '..oo..'],
+  spark: ['..y..', '.yWy.', 'yWWWy', '.yWy.', '..y..'],
+  console: {
+    a: ['ooooooooooo', 'oKKKKKKKKKo', 'oKggKgggKKo', 'oKgggKKKKKo', 'oKggggKgKKo', 'oKgKKKKKKKo', 'ooooooooooo', '.oSSSSSSSo.', 'ooooooooooo'],
+    b: ['ooooooooooo', 'oKKKKKKKKKo', 'oKgggKggKKo', 'oKggKgggKKo', 'oKgggggKKKo', 'oKgcKKKKKKo', 'ooooooooooo', '.oSSSSSSSo.', 'ooooooooooo'],
+  },
 };
+
+// The playground's geometry in pixels from its tile's ground point (decision 41), shared by the
+// pictures and the scene: one tile along a column or row, swings across the rows, slide down the columns.
+const ALONG_C = { x: TW / 2, y: TH / 2 };
+const ALONG_R = { x: -TW / 2, y: TH / 2 };
+const at = (c: number, r: number, up = 0): Point => ({ x: Math.round(ALONG_C.x * c + ALONG_R.x * r), y: Math.round(ALONG_C.y * c + ALONG_R.y * r - up) });
+const SWING_TOP = 18 * A;
+const SLIDE_TOP = 20 * A;
+const PLAYGROUND = {
+  swings: { pivots: [at(0, -0.16, SWING_TOP), at(0, 0.16, SWING_TOP)], rope: 12 * A },
+  slide: { ladder: at(-0.3, 0), top: at(-0.24, 0, SLIDE_TOP), foot: at(0.36, 0, A) },
+};
+
+/** A pixel line from one point to another, `t` pixels thick. */
+function line(ctx: Ctx, color: string, x0: number, y0: number, x1: number, y1: number, t = 1) {
+  const steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+  for (let i = 0; i <= steps; i++) {
+    const x = Math.round(x0 + ((x1 - x0) * i) / steps);
+    const y = Math.round(y0 + ((y1 - y0) * i) / steps);
+    rect(ctx, color, x - Math.floor(t / 2), y - Math.floor(t / 2), t, t);
+  }
+}
+
+/** A repeatable number in [0, 1) for two integers, for patterns that must match between frames. */
+function noise(a: number, b: number): number {
+  const n = Math.imul(Math.imul(a + 17, 374761393) ^ Math.imul(b + 31, 668265263), 1274126177);
+  return ((n ^ (n >>> 15)) >>> 0) / 4294967296;
+}
 
 function mulberry32(seed: number): () => number {
   return () => {
@@ -136,7 +176,7 @@ export function drawnArt(): Art {
     });
   }
 
-  function tileTex(key: string, top: string, speckles: string[], lip: string, rnd: () => number, extra?: (ctx: Ctx) => void) {
+  function tileTex(key: string, top: string, speckles: string[], lip: string, rnd: () => number, extra?: (ctx: Ctx) => void, sides: [string, string] = [C.sideL, C.sideR]) {
     canvasTex(key, TW, TH + SIDE, (ctx) => {
       diamond(ctx, top, TW / 2, TH / 2, TW / 2);
       for (let i = 0; i < 22 * A * A; i++) {
@@ -148,7 +188,7 @@ export function drawnArt(): Art {
       for (let x = 0; x < TW; x++) {
         const b = TILE_BOTTOMS[x] ?? 0;
         for (let k = 1; k <= SIDE; k++) {
-          let color = x < TW / 2 ? C.sideL : C.sideR;
+          let color = x < TW / 2 ? sides[0] : sides[1];
           if (k <= A) color = lip;
           else if (k % (3 * A) === 0) color = C.strata;
           else if (rnd() < 0.03) color = '#8a6240';
@@ -204,28 +244,154 @@ export function drawnArt(): Art {
     });
   }
 
-  function hedge(key: string, blossom: string, seed: number) {
-    const rnd = mulberry32(seed * 31 + A);
-    const hw = 16;
-    building(key, {
-      hw, wallH: 6, wallL: '#3a8436', wallR: '#2b6829', top: '#4c9f42', topInner: '#4c9f42',
-      walls: (ctx, cx, bottoms, wallH, hwPx) => {
-        for (let i = 0; i < 30 * A * A; i++) {
-          const x = cx - hwPx + Math.floor(rnd() * hwPx * 2);
-          rect(ctx, rnd() < 0.5 ? '#245a23' : '#4c9f42', x, (bottoms[x] ?? 0) - Math.floor(rnd() * wallH), 1, 1);
+  // Streams (decision 42): a bridge's rails, one per edge of its tile, and water pouring off the
+  // island's front edges, in frames that loop as it falls.
+  function waterworks() {
+    const lift = 8 * A;
+    const corners: Record<'top' | 'right' | 'bottom' | 'left', Point> = { top: { x: TW / 2, y: lift }, right: { x: TW, y: lift + TH / 2 }, bottom: { x: TW / 2, y: lift + TH }, left: { x: 0, y: lift + TH / 2 } };
+    const edges: Record<Edge, [Point, Point]> = { ne: [corners.top, corners.right], se: [corners.right, corners.bottom], sw: [corners.bottom, corners.left], nw: [corners.left, corners.top] };
+    const mid = { x: TW / 2, y: lift + TH / 2 };
+    const inward = (p: Point, f: number) => ({ x: Math.round(p.x + (mid.x - p.x) * f), y: Math.round(p.y + (mid.y - p.y) * f) });
+    for (const [edge, [from, to]] of Object.entries(edges) as Array<[Edge, [Point, Point]]>) {
+      const key = names.rail(edge);
+      anchors.set(key, { ox: 0.5, oy: mid.y / (TH + lift), height: mid.y });
+      canvasTex(key, TW, TH + lift, (ctx) => {
+        const a = inward(from, 0.16);
+        const b = inward(to, 0.16);
+        const high = 5 * A;
+        for (const t of [0.08, 0.5, 0.92]) {
+          const x = Math.round(a.x + (b.x - a.x) * t);
+          const y = Math.round(a.y + (b.y - a.y) * t);
+          rect(ctx, '#4a2e1c', x, y - high, A, high + A);
         }
-      },
-      extras: (ctx, cx, topY) => {
-        const hwPx = hw * A;
-        for (let i = 0; i < 40 * A * A; i++) {
-          const x = Math.floor(rnd() * hwPx * 2) - hwPx;
-          const y = Math.floor(rnd() * hwPx) - hwPx / 2;
-          if (Math.abs(x + 0.5) / hwPx + Math.abs(y + 0.5) / (hwPx / 2) > 0.85) continue;
-          const roll = rnd();
-          rect(ctx, roll < 0.12 ? blossom : roll < 0.55 ? '#6cbf4f' : '#3a8436', cx + x, topY + y, 1, 1);
+        line(ctx, '#8a5a32', a.x, a.y - high, b.x, b.y - high, A);
+        line(ctx, '#c48a58', a.x, a.y - high - 1, b.x, b.y - high - 1, 1);
+        line(ctx, '#6b4423', a.x, a.y - Math.round(high / 2), b.x, b.y - Math.round(high / 2), 1);
+      });
+    }
+
+    const fall = 44 * A;
+    const shift = 3 * A;
+    for (const edge of ['se', 'sw'] as const) {
+      for (let frame = 0; frame < WATERFALL_FRAMES; frame++) {
+        canvasTex(names.waterfall(edge, frame), TW / 2, TH / 2 + fall, (ctx) => {
+          for (let x = 0; x < TW / 2; x++) {
+            // The column starts on the tile's edge: rising to its right corner, or falling to its bottom one.
+            const top = edge === 'se' ? TH / 2 - Math.floor(x / 2) : Math.floor(x / 2);
+            const lane = Math.floor(x / A);
+            for (let k = 0; k < fall; k++) {
+              const step = (((Math.floor((k - frame * shift) / shift)) % WATERFALL_FRAMES) + WATERFALL_FRAMES) % WATERFALL_FRAMES;
+              const streak = noise(lane, step) < 0.35;
+              ctx.globalAlpha = k < fall * 0.55 ? 1 : Math.max(0, 1 - (k - fall * 0.55) / (fall * 0.45));
+              rect(ctx, k < A ? '#d8ecff' : streak ? C.waterGlint : C.water, x, top + k, 1, 1);
+            }
+          }
+          ctx.globalAlpha = 1;
+        });
+      }
+    }
+  }
+
+  // Where mirlings wait for me (decision 41): swings without their seats, which the scene hangs and
+  // swings, and a slide with its ladder at the back and its chute coming down towards the front.
+  function playground() {
+    const w = TW;
+    const ground = (h: number) => ({ x: TW / 2, y: h - TH / 2 });
+
+    const sh = SWING_TOP + 8 * A + TH;
+    const sg = ground(sh);
+    anchors.set(names.play('swings'), { ox: sg.x / w, oy: sg.y / sh, height: sg.y });
+    canvasTex(names.play('swings'), w, sh, (ctx) => {
+      const p = (c: number, r: number, up = 0) => { const q = at(c, r, up); return { x: sg.x + q.x, y: sg.y + q.y }; };
+      for (const end of [-0.36, 0.36]) {
+        const top = p(0, end, SWING_TOP);
+        for (const foot of [-0.2, 0.2]) {
+          const g = p(foot, end);
+          line(ctx, foot < 0 ? '#2c4466' : '#3a5a8a', top.x, top.y, g.x, g.y, A);
         }
-      },
+      }
+      const a = p(0, -0.36, SWING_TOP);
+      const b = p(0, 0.36, SWING_TOP);
+      line(ctx, '#4a6fa5', a.x, a.y, b.x, b.y, A);
+      line(ctx, '#7d93c4', a.x, a.y - 1, b.x, b.y - 1, 1);
     });
+
+    const dh = SLIDE_TOP + 10 * A + TH;
+    const dg = ground(dh);
+    anchors.set(names.play('slide'), { ox: dg.x / w, oy: dg.y / dh, height: dg.y });
+    canvasTex(names.play('slide'), w, dh, (ctx) => {
+      const p = (q: Point) => ({ x: dg.x + q.x, y: dg.y + q.y });
+      const { ladder, top, foot } = PLAYGROUND.slide;
+      const side = at(0, 0.09);
+      // The ladder: two rails up to the platform, with rungs.
+      for (const s of [-1, 1]) {
+        const g = p({ x: ladder.x + s * side.x, y: ladder.y + s * side.y });
+        line(ctx, '#8a8a98', g.x, g.y, g.x, g.y - SLIDE_TOP - 3 * A, A);
+      }
+      for (let up = 3 * A; up < SLIDE_TOP; up += 3 * A) {
+        const a = p({ x: ladder.x - side.x, y: ladder.y - side.y - up });
+        const b = p({ x: ladder.x + side.x, y: ladder.y + side.y - up });
+        line(ctx, '#b9b9c2', a.x, a.y, b.x, b.y, 1);
+      }
+      const deck = p({ x: ladder.x, y: ladder.y - SLIDE_TOP });
+      isoBlock(ctx, deck.x, deck.y + A, 4 * A, A, '#6e6e78', '#5a5a63', '#b9b9c2');
+      // A post under the middle of the chute, then the chute itself, lipped on both sides.
+      const t = p(top);
+      const f = p(foot);
+      const m = { x: Math.round((t.x + f.x) / 2), y: Math.round((t.y + f.y) / 2) };
+      const under = p(at(0.03, 0));
+      line(ctx, '#6e6e78', m.x, m.y, m.x, under.y, A);
+      const steps = Math.max(Math.abs(f.x - t.x), Math.abs(f.y - t.y)) * 2;
+      for (let i = 0; i <= steps; i++) {
+        const x = t.x + ((f.x - t.x) * i) / steps;
+        const y = t.y + ((f.y - t.y) * i) / steps;
+        line(ctx, i % 6 < 3 ? '#ffd34d' : '#ffe08a', Math.round(x - side.x), Math.round(y - side.y), Math.round(x + side.x), Math.round(y + side.y), 1);
+      }
+      for (const s of [-1, 1]) line(ctx, '#e07a3f', t.x + s * side.x, t.y + s * side.y - A, f.x + s * side.x, f.y + s * side.y - A, A);
+    });
+  }
+
+  // A rubber ring, red and white, cut across its middle: the back half behind the mirling, the front before it.
+  function ring() {
+    const w = 22;
+    const h = 11;
+    const cx = w / 2;
+    const cy = h / 2;
+    const inRing = (x: number, y: number) => {
+      const dx = x + 0.5 - cx;
+      const dy = y + 0.5 - cy;
+      return (dx / 11) ** 2 + (dy / 5.5) ** 2 <= 1 && (dx / 5.5) ** 2 + (dy / 2.4) ** 2 > 1;
+    };
+    for (const half of ['back', 'front'] as const) {
+      canvasTex(names.ring(half), w, h, (ctx) => {
+        for (let y = 0; y < h; y++) {
+          if ((half === 'back') !== (y + 0.5 < cy)) continue;
+          for (let x = 0; x < w; x++) {
+            if (!inRing(x, y)) continue;
+            const edge = !inRing(x - 1, y) || !inRing(x + 1, y) || !inRing(x, y - 1) || !inRing(x, y + 1);
+            const red = Math.floor((Math.atan2((y + 0.5 - cy) / 5.5, (x + 0.5 - cx) / 11) + Math.PI) / (Math.PI / 4)) % 2 === 0;
+            const low = y + 0.5 > cy + 2;
+            rect(ctx, edge ? '#7a2018' : red ? (low ? '#b8382a' : '#e04b3a') : low ? '#cfcabb' : '#f4f1e6', x, y, 1, 1);
+          }
+        }
+      });
+    }
+  }
+
+  // What a mirling holds while it works, and the bubble over one thinking.
+  function props() {
+    const book = { o: '#2a2f45', W: '#f4f1e6', l: '#9c9dbb', B: '#55658a' };
+    pixelMap(names.prop('book.a'), MAPS.book.a, book);
+    pixelMap(names.prop('book.b'), MAPS.book.b, book);
+    pixelMap(names.prop('hammer'), MAPS.hammer, { o: '#34343c', G: '#8e8e98', H: '#d0d0d6', b: '#a8744a' });
+    pixelMap(names.prop('spark'), MAPS.spark, { y: '#ffd34d', W: '#fff7ec' });
+    const screen = { o: '#2a2f45', K: '#14182b', g: '#7bd389', c: '#e8fbe9', S: '#55658a' };
+    pixelMap(names.prop('console.a'), MAPS.console.a, screen);
+    pixelMap(names.prop('console.b'), MAPS.console.b, screen);
+    for (let frame = 0; frame < 3; frame++) {
+      const rows = MAPS.thought.map((row, y) => (y === 4 ? [...row].map((ch, x) => ([4, 7, 10].slice(0, frame + 1).some((d) => x === d || x === d + 1) ? 'd' : ch)).join('') : row));
+      pixelMap(names.thought(frame), rows, { o: '#2a2f45', W: '#f4f1e6', d: '#5a5f7a' });
+    }
   }
 
   function tree(key: string, apples: boolean) {
@@ -390,10 +556,24 @@ export function drawnArt(): Art {
         if (insideTile(x, y) && insideTile(x + 2, y + 1)) { rect(ctx, '#c49866', x, y, 2, 1); rect(ctx, '#6e4a2a', x, y + 1, 2, 1); }
       }
     });
+    // No rim on top, so neighbouring water tiles run together into one stream or pond.
     tileTex(names.tile('water'), C.water, [C.water], C.waterRim, rnd, (ctx) => {
-      for (let x = 0; x < TW; x++) for (let y = 0; y < TH; y++) if (insideTile(x, y) && !insideTile(x, y + A)) rect(ctx, C.waterRim, x, y, 1, 1);
       for (const [x, y] of [[9, 7], [18, 5], [15, 10]] as Array<[number, number]>) rect(ctx, C.waterGlint, x * A, y * A, 2 * A, 1);
     });
+    // A bridge's deck: eight planks laid across the way it's crossed (decision 42).
+    for (const span of ['c', 'r'] as const) {
+      tileTex(names.tile(`deck-${span}`), '#a8774a', ['#a8774a'], '#6b4a2e', rnd, (ctx) => {
+        for (let y = 0; y < TH; y++) {
+          for (let x = 0; x < TW; x++) {
+            const u = (x + 0.5 - TW / 2) / (TW / 2);
+            const v = (y + 0.5 - TH / 2) / (TH / 2);
+            if (Math.abs(u) + Math.abs(v) > 1) continue;
+            const t = ((span === 'c' ? u + v : v - u) + 1) * 4;
+            rect(ctx, t - Math.floor(t) < 0.14 ? '#5e3e26' : Math.floor(t) % 2 ? '#b98957' : '#a8774a', x, y, 1, 1);
+          }
+        }
+      }, ['#6b4423', '#4f311a']);
+    }
   }
 
   function buildings() {
@@ -460,7 +640,8 @@ export function drawnArt(): Art {
   return {
     scale: A,
     tile: { w: TW, h: TH, side: SIDE },
-    sizes: { creature: MAPS.creature.a.length, beacon: MAPS.beacon.length, bubble: MAPS.bubble.length },
+    sizes: { creature: MAPS.creature.a.length, beacon: MAPS.beacon.length, bubble: MAPS.bubble.length, thought: MAPS.thought.length },
+    playground: PLAYGROUND,
 
     create(s) {
       scene = s;
@@ -487,9 +668,12 @@ export function drawnArt(): Art {
           rect(ctx, '#ffd34d', hw - down, hh + i, A + 1, 1); rect(ctx, '#ffd34d', hw + down - A - 1, hh + i, A + 1, 1);
         }
       });
-      ACCENTS.forEach((accent, i) => hedge(names.hedge(accent), ACCENT_COLOUR[accent], i + 1));
       buildings();
       decorations();
+      waterworks();
+      playground();
+      ring();
+      props();
     },
 
     anchor(key) {

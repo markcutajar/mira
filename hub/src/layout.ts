@@ -1,5 +1,5 @@
 // Build mode's layouts (decision 39): how I arranged each project's section of the island, kept by
-// the hub so every browser shows the same island. Places are inside the section's hedge, 1 to 8
+// the hub so every browser shows the same island. Places are on the section's own ground, 1 to 8
 // across and down, so a layout follows its section wherever the island puts it.
 
 import { z } from 'zod';

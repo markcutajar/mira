@@ -1,5 +1,5 @@
 // Build mode (decision 39): how I arrange each project's section of the island. Plants and
-// decorations go anywhere free inside the hedge, ground can be painted as path or grass, and the
+// decorations go anywhere free on its own ground, ground can be painted as path or grass, and the
 // buildings that reflect real work can be moved and restyled but never added or removed. No DOM
 // or Phaser here, so it can be tested on its own.
 
@@ -30,7 +30,7 @@ export interface Placed extends TemplateBuilding {
   style: HouseStyle;
 }
 
-/** Where a tile lies inside a section's hedge, as the layout names it; null outside every section's planting ground. */
+/** Where a tile lies on a section's own ground, inside its shore, as the layout names it; null anywhere else. */
 export function placeOf(c: number, r: number, sections: number): { i: number; place: string } | null {
   for (let i = 0; i < sections; i++) {
     const { c0, r0 } = sectionOrigin(i);

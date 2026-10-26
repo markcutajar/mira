@@ -285,7 +285,7 @@ export function createHub(options: HubOptions) {
   const layouts = store.layouts();
   async function arrange(req: IncomingMessage, res: ServerResponse, system: string) {
     const parsed = SectionLayout.safeParse(parseObject(await readBody(req)));
-    if (!parsed.success) return reply(res, 400, 'Expected a section layout: ground, placed, removed, moved and styles, inside the hedge.');
+    if (!parsed.success) return reply(res, 400, 'Expected a section layout: ground, placed, removed, moved and styles, on its own ground.');
     const layout = emptyLayout(parsed.data) ? null : parsed.data;
     store.setLayout(system, layout);
     if (layout) layouts[system] = layout;

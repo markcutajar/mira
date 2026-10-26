@@ -10,26 +10,38 @@ describe('the island layout', () => {
     assert.equal(seen.size, 30);
   });
 
-  it('keeps every existing section exactly as it was when a project is added', () => {
+  it("keeps every section's own ground exactly as it was when a project is added", () => {
     const three = generateCells(['code', 'code', 'code']);
     const four = generateCells(['code', 'code', 'code', 'code']);
     for (const cell of three.values()) {
       if (cell.section === null) continue;
-      assert.deepEqual(four.get(`${cell.c},${cell.r}`), cell);
+      const { c0, r0 } = sectionOrigin(cell.section);
+      const inside = [cell.c - c0, cell.r - r0].every((v) => v > 0 && v < SEC - 1);
+      if (inside) assert.deepEqual(four.get(`${cell.c},${cell.r}`), cell);
     }
     assert.ok(four.size > three.size);
   });
 
-  it('rings each section with a hedge, with a gate in the middle of every side', () => {
+  it('gives a lone section an open shore with a gate in the middle of every side, and no stream', () => {
     const cells = generateCells(['code']);
     const { c0, r0 } = sectionOrigin(0);
     const at = (lc: number, lr: number) => cells.get(`${c0 + lc},${r0 + lr}`) as Cell;
-    assert.equal(at(0, 0).ch, 'h');
-    assert.equal(at(4, 0).ch, 'p');
-    assert.equal(at(0, 5).ch, 'p');
-    assert.equal(at(SEC - 1, 2).ch, 'h');
-    assert.equal(at(2, 3).section, 0);
+    assert.ok([at(0, 0), at(SEC - 1, 2), at(3, SEC - 1)].every((cell) => cell.walk && cell.section === 0));
+    assert.deepEqual([at(4, 0).ch, at(0, 5).ch], ['p', 'p']);
+    assert.equal([...cells.values()].some((cell) => cell.section === null && (cell.ch === 'w' || cell.ch === 'b')), false);
     assert.equal(generateCells([]).size, 0);
+  });
+
+  it('runs a stream between neighbouring sections out to the coast, with a bridge where their gates meet', () => {
+    const cells = generateCells(['code', 'code']);
+    const { c0, r0 } = sectionOrigin(0);
+    const at = (c: number, r: number) => cells.get(`${c},${r}`) as Cell;
+    const stream = [...cells.values()].filter((cell) => cell.c === c0 + SEC || cell.c === c0 + SEC + 1);
+    assert.ok(stream.every((cell) => cell.ch === 'w' || cell.ch === 'b'));
+    assert.ok(Math.min(...stream.map((cell) => cell.r)) < r0 - 1 && Math.max(...stream.map((cell) => cell.r)) > r0 + SEC); // past both sections
+    assert.deepEqual(stream.filter((cell) => cell.ch === 'b').map((cell) => [cell.c - c0, cell.r - r0, cell.span, cell.walk]), [[SEC, 4, 'c', true], [SEC + 1, 4, 'c', true], [SEC, 5, 'c', true], [SEC + 1, 5, 'c', true]]);
+    const walkable = (c: number, r: number) => cells.get(`${c},${r}`)?.walk ?? false;
+    assert.ok(findPath(walkable, at(c0 + SEC - 1, r0 + 4), at(sectionOrigin(1).c0, r0 + 4)).length > 0); // across the bridge
   });
 
   it('puts the template buildings inside the section, each with somewhere to stand', () => {
@@ -93,7 +105,7 @@ describe('build mode', () => {
     assert.deepEqual(restyle(undefined, 0, 'stone'), { layout: { styles: { 0: 'brick' } } });
   });
 
-  it('finds the section and place inside its hedge, and nothing on the hedge or outside', () => {
+  it('finds the section and place on its own ground, and nothing on its shore or outside', () => {
     assert.deepEqual(placeOf(c0 + 1, r0 + 8, 1), { i: 0, place: '1,8' });
     assert.equal(placeOf(c0, r0 + 3, 1), null);
     assert.equal(placeOf(c0 + 9, r0 + 3, 1), null);

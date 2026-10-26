@@ -311,13 +311,13 @@ describe('hub server', () => {
     assert.equal((await post('/api/names/system/mira', { name: 'Mira' })).status, 405);
   });
 
-  it('keeps how I arranged a section, inside its hedge only, for every browser', async () => {
+  it('keeps how I arranged a section, on its own ground only, for every browser', async () => {
     const put = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const layouts = async () => ((await (await fetch(`${base}/api/layouts`)).json()) as { layouts: unknown }).layouts;
     const layout = { placed: { '1,1': 'bench' }, moved: { 0: [3, 4] }, styles: { 0: 'stone' } };
     assert.equal((await put('/api/layouts/mira', layout)).status, 204);
     assert.deepEqual(await layouts(), { mira: { placed: { '1,1': 'bench' }, moved: { 0: [3, 4] }, styles: { 0: 'stone' } } });
-    assert.equal((await put('/api/layouts/mira', { placed: { '9,1': 'bench' } })).status, 400); // on the hedge
+    assert.equal((await put('/api/layouts/mira', { placed: { '9,1': 'bench' } })).status, 400); // on the shore
     assert.equal((await put('/api/layouts/mira', { castle: true })).status, 400);
     assert.equal((await put('/api/layouts/mira', { placed: {} })).status, 204); // nothing left to keep
     assert.deepEqual(await layouts(), {});
