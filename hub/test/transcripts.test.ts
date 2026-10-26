@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
-import { activeSessions, buildTurns, isInside, lastState, latestTitle, parseLines, readEntries, readStory, writeTitle } from '../src/claude-code/transcripts.ts';
+import { activeSessions, buildTurns, isInside, lastState, latestTitle, parseLines, pastSessions, readEntries, readStory, writeTitle } from '../src/claude-code/transcripts.ts';
 import { makeCostOf } from '../src/pricing.ts';
 import { conversation, lines, RESPONSE_USD, writeSession } from './fixtures.ts';
 
@@ -98,6 +98,33 @@ describe('activeSessions', () => {
 
   it('copes with a missing projects folder', () => {
     assert.deepEqual(activeSessions(join(dir, 'nope'), 0), []);
+  });
+});
+
+describe('pastSessions', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mira-past-'));
+  const old = join(dir, 'project-a', 's-old.jsonl');
+  const monthAgo = (Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000;
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('lists every session Claude Code still keeps, however old, with its title', () => {
+    mkdirSync(join(dir, 'project-a', 's-old', 'subagents'), { recursive: true });
+    writeFileSync(old, [msg('user', 's-old', '2026-09-01T10:00:00.000Z'), line({ type: 'ai-title', aiTitle: 'Old work', sessionId: 's-old' })].join('\n'));
+    utimesSync(old, monthAgo, monthAgo);
+    writeFileSync(join(dir, 'project-a', 's-old', 'subagents', 'agent-1.jsonl'), msg('user', 's-old', '2026-09-01T10:01:00.000Z'));
+    writeFileSync(join(dir, 'project-a', 's-empty.jsonl'), line({ type: 'ai-title', aiTitle: 'Nothing said', sessionId: 's-empty' }));
+    const found = pastSessions(dir);
+    assert.deepEqual(found.map((s) => [s.sessionId, s.title, s.lastAt, s.status]), [['s-old', 'Old work', '2026-09-01T10:00:00.000Z', 'working']]);
+  });
+
+  it('reads a transcript again once it changes', () => {
+    appendFileSync(old, `\n${line({ type: 'custom-title', customTitle: 'Renamed', sessionId: 's-old' })}\n`);
+    utimesSync(old, monthAgo + 60, monthAgo + 60);
+    assert.equal(pastSessions(dir)[0]?.title, 'Renamed');
+  });
+
+  it('copes with a missing projects folder', () => {
+    assert.deepEqual(pastSessions(join(dir, 'nope')), []);
   });
 });
 

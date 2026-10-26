@@ -64,7 +64,7 @@ const palette = createPalette($('palette'), {
 });
 
 const panel = createPanel({
-  session: (id) => live.sessions.find((s) => s.id === id),
+  session: (id) => live.sessions.find((s) => s.id === id) ?? sidebar.past(id),
   pending: () => live.pending,
   waitSeconds: () => live.waitSeconds,
   projectLabel: (system) => projectLabel(system, live.systems),

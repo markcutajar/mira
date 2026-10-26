@@ -11,7 +11,7 @@ import { CONTRACT_VERSION, MiraEvent } from '../../contracts/src/index.ts';
 import type { Editor, EditorTarget } from './editor.ts';
 import type { Growth } from './growth.ts';
 import { Permissions, summarise, type Decision } from './permissions.ts';
-import type { Roster } from './roster.ts';
+import type { Roster, SessionView } from './roster.ts';
 import type { SourceAdapter } from './sources.ts';
 import type { Kind, Store } from './store.ts';
 import type { Place } from './systems.ts';
@@ -52,6 +52,7 @@ const CLOCK_SKEW_MS = 10 * 60 * 1000;
 const HEARTBEAT_MS = 25 * 1000;
 const CHANGES_MS = 5 * 1000;
 const SYSTEMS_DAYS = 14;
+const HISTORY_PAGE = 20;
 
 export function createHub(options: HubOptions) {
   const { store, roster } = options;
@@ -79,6 +80,39 @@ export function createHub(options: HubOptions) {
   const sessions = () => roster.snapshot()
     .filter((s) => !gone('session', s.id, s.lastAt) && !gone('system', s.system, s.lastAt))
     .map((s) => ({ ...s, title: names.session[s.id] ?? sources.get(s.source)?.title?.(s), worktree: options.placeFor(s.cwd).worktree }));
+
+  // A session on the board, or an earlier one a source still keeps (decision 40), which then joins
+  // the roster so its story, terminal and editor work like any other's.
+  function sessionById(id: string): SessionView | undefined {
+    const known = roster.get(id);
+    if (known) return known;
+    for (const source of options.sources) {
+      const past = source.history?.().find((p) => p.sessionId === id);
+      if (!past) continue;
+      roster.seed(source.id, [past]);
+      return roster.get(id);
+    }
+    return undefined;
+  }
+
+  // A project's earlier conversations, newest first, leaving out those on the board. Titles and
+  // folders are read from the sources when asked, and never stored.
+  function history(res: ServerResponse, system: string, url: URL) {
+    const limit = clamp(Number(url.searchParams.get('limit') ?? HISTORY_PAGE), 1, 100);
+    const before = url.searchParams.get('before') ?? '\uffff';
+    const shown = new Set(sessions().map((s) => s.id));
+    const past = options.sources
+      .flatMap((source) => (source.history?.() ?? []).map((p) => ({ ...p, source: source.id })))
+      .filter((p) => p.system === system && p.lastAt < before && !shown.has(p.sessionId))
+      .sort((a, b) => b.lastAt.localeCompare(a.lastAt));
+    const spent = store.spent(system);
+    const page = past.slice(0, limit).map((p) => ({
+      id: p.sessionId, source: p.source, system, cwd: p.cwd, lastAt: p.lastAt,
+      title: names.session[p.sessionId] ?? p.title, worktree: options.placeFor(p.cwd).worktree,
+      ...(spent[p.sessionId] ? { usage: spent[p.sessionId] } : {}),
+    }));
+    json(res, { sessions: page, more: past.length > limit });
+  }
 
   const systems = () => store.systems(new Date(Date.now() - SYSTEMS_DAYS * 86_400_000).toISOString())
     .filter((s) => s.name !== 'unknown' && !gone('system', s.name, s.lastAt))
@@ -162,7 +196,7 @@ export function createHub(options: HubOptions) {
   }
 
   function story(res: ServerResponse, id: string, url: URL) {
-    const session = roster.get(id);
+    const session = sessionById(id);
     const source = session ? sources.get(session.source) : undefined;
     if (!session || !source?.story) return reply(res, 404, 'No story for that session.');
     const helper = url.searchParams.get('helper') ?? undefined;
@@ -175,7 +209,7 @@ export function createHub(options: HubOptions) {
   // GET says which editor window holds the session, for the board's link; POST then opens the
   // session there, after the board's link has had a moment to bring that window forward.
   function editor(req: IncomingMessage, res: ServerResponse, id: string) {
-    const session = roster.get(id);
+    const session = sessionById(id);
     const at = session ? sources.get(session.source)?.continueAt?.(session) : undefined;
     const target = at ? options.editor?.target(at.folder) : undefined;
     if (!at || !target) return reply(res, 404, "That session can't be opened in an editor.");
@@ -219,7 +253,7 @@ export function createHub(options: HubOptions) {
       const body = parseObject(await readBody(req));
       const name = typeof body?.name === 'string' ? body.name.trim() : null;
       if (name === null || name.length > 80) return reply(res, 400, 'Expected { name }, up to 80 characters; an empty name goes back to the original.');
-      const session = kind === 'session' ? roster.get(key) : undefined;
+      const session = kind === 'session' ? sessionById(key) : undefined;
       const source = session && sources.get(session.source);
       if (session && source?.rename) {
         // The source keeps this session's name, and Mira keeps none of its own (decision 37).
@@ -272,6 +306,7 @@ export function createHub(options: HubOptions) {
     const editorOf = req.method === 'GET' || req.method === 'POST' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/editor$/)?.[1] : undefined;
     const manage = req.method === 'PUT' || req.method === 'POST' ? url.pathname.match(/^\/api\/(names|remove)\/(system|session)\/([^/]{1,240})$/) : null;
     const startOf = req.method === 'GET' || req.method === 'POST' ? url.pathname.match(/^\/api\/systems\/([^/]{1,240})\/start$/)?.[1] : undefined;
+    const historyOf = req.method === 'GET' ? url.pathname.match(/^\/api\/systems\/([^/]{1,240})\/history$/)?.[1] : undefined;
     const layoutOf = req.method === 'PUT' ? url.pathname.match(/^\/api\/layouts\/([^/]{1,240})$/)?.[1] : undefined;
     if (ingestFor?.ingest) return void ingest(req, res, ingestFor);
     if (route === 'POST /hooks/permission') return void permission(req, res);
@@ -281,6 +316,7 @@ export function createHub(options: HubOptions) {
     if (terminalOf) return void terminal(res, terminalOf);
     if (editorOf) return editor(req, res, editorOf);
     if (startOf) return void startIn(req, res, decodeName(startOf));
+    if (historyOf) return history(res, decodeName(historyOf), url);
     if (route === 'GET /api/stream') return stream(req, res, url);
     if (route === 'POST /api/presence') return void presence(req, res);
     if (req.method === 'POST' && prompt?.[1]) return void answer(req, res, prompt[1]);
@@ -314,7 +350,7 @@ export function createHub(options: HubOptions) {
   const terminals = options.terminals;
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   const terminalSpec = (id: string) => {
-    const session = roster.get(id);
+    const session = sessionById(id);
     return session && terminals ? (sources.get(session.source)?.terminalFor?.(session) ?? null) : null;
   };
   async function terminal(res: ServerResponse, id: string) {

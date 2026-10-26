@@ -1,7 +1,8 @@
 // The board, condensed down the left of the sky (decision 31): what's waiting for me, then every
-// project with its sessions. A session row flies to its mirling and opens its story.
+// project with its sessions and, folded away, its earlier conversations (decision 40). A session row
+// flies to its mirling and opens its story.
 
-import { ago, answerPrompt, cost, esc, projectLabel, sessionLabel, short, STATUS_LABEL, type BoardSession, type PendingPrompt } from '../shared/format.ts';
+import { ago, answerPrompt, cost, esc, projectLabel, sessionLabel, short, STATUS_LABEL, when, type BoardSession, type PendingPrompt } from '../shared/format.ts';
 import type { Live } from '../shared/live.ts';
 import { removeThing, renameThing } from '../shared/manage.ts';
 import { openStart } from '../shared/start.ts';
@@ -22,7 +23,21 @@ export interface Sidebar {
   render(): void;
   /** Scrolls to a project and highlights it, for a click on its section in the sky. */
   showProject(name: string): void;
+  /** An earlier conversation listed here, for the story of one that's no longer on the board. */
+  past(id: string): BoardSession | undefined;
 }
+
+/** A project's earlier conversations, while its fold is open. */
+interface Fold {
+  sessions: BoardSession[];
+  more: boolean;
+  loading: boolean;
+  error: string;
+  /** The project's sessions on the board when the list was read, to read it again when one leaves. */
+  live: string;
+}
+
+const EARLIER_PAGE = 20;
 
 const ORDER = ['needs-me', 'failed', 'my-turn', 'working', 'ended', null];
 const rank = (s?: BoardSession) => ORDER.indexOf(s?.status ?? null);
@@ -31,9 +46,11 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
   const { live } = options;
   const menus = new Set<string>(); // projects whose ⋯ menu is open
   const busy = new Set<string>(); // prompts being answered
+  const earlier = new Map<string, Fold>(); // projects whose earlier conversations are unfolded
   let last = '';
 
   function render() {
+    for (const [system, fold] of earlier) if (!fold.loading && fold.live !== liveIn(system)) void loadEarlier(system);
     const html = promptsHTML() + projectsHTML();
     if (html === last) return tick();
     root.innerHTML = html;
@@ -95,8 +112,57 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
       </header>
       ${open ? `<div class="proj-menu"><button type="button" class="ghost small" data-rename-system="${esc(system)}">Rename</button><button type="button" class="ghost small" data-remove-system="${esc(system)}">Remove</button></div>` : ''}
       ${sessions.length ? `<ul class="rows">${sessions.map(rowHTML).join('')}</ul>` : ''}
+      ${earlierHTML(system)}
     </section>`;
   }
+
+  // Earlier conversations: what the project's sources still keep, read from the hub when unfolded.
+  const liveIn = (system: string) => live.sessions.filter((s) => s.system === system).map((s) => s.id).sort().join();
+
+  function earlierHTML(system: string): string {
+    const fold = earlier.get(system);
+    const toggle = `<button type="button" class="earlier-toggle" data-earlier="${esc(system)}" aria-expanded="${Boolean(fold)}">${fold ? '▾' : '▸'} Earlier conversations</button>`;
+    if (!fold) return `<div class="earlier">${toggle}</div>`;
+    const shown = new Set(live.sessions.map((s) => s.id));
+    const list = fold.sessions.filter((s) => !shown.has(s.id));
+    const body = fold.error ? `<p class="hint">${esc(fold.error)}</p>`
+      : list.length ? `<ul class="rows">${list.map(pastHTML).join('')}</ul>`
+      : `<p class="hint">${fold.loading ? 'Reading…' : 'No earlier conversations.'}</p>`;
+    const more = fold.more ? `<button type="button" class="ghost small" data-earlier-more="${esc(system)}"${fold.loading ? ' disabled' : ''}>Show more</button>` : '';
+    return `<div class="earlier">${toggle}${body}${more}</div>`;
+  }
+
+  function pastHTML(s: BoardSession): string {
+    const badge = s.worktree ? `<span class="badge tree" title="A git worktree of ${esc(s.system)}">${esc(s.worktree)}</span>` : '';
+    const meta = [esc(when(s.lastAt)), s.usage ? esc(cost(s.usage.costUsd)) : ''].filter(Boolean).join(' · ');
+    return `<li class="row-item"><button type="button" class="row${options.current() === s.id ? ' open' : ''}" data-session="${esc(s.id)}" data-status="earlier" title="Open its story; Terminal or Continue in VS Code picks it up again">
+      <span class="dot"></span>
+      <span class="row-title">${esc(sessionLabel(s))}${badge}</span>
+      <span class="row-meta">${meta}</span>
+    </button><button type="button" class="ghost small row-rename" data-rename-session="${esc(s.id)}" title="Rename this session" aria-label="Rename ${esc(sessionLabel(s))}">✎</button></li>`;
+  }
+
+  async function loadEarlier(system: string, more = false) {
+    const fold = earlier.get(system);
+    if (!fold) return;
+    Object.assign(fold, { loading: true, live: liveIn(system) });
+    render();
+    const before = more ? fold.sessions.at(-1)?.lastAt : undefined;
+    const limit = more ? EARLIER_PAGE : Math.max(EARLIER_PAGE, fold.sessions.length);
+    try {
+      const res = await fetch(`/api/systems/${encodeURIComponent(system)}/history?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+      if (!res.ok) throw new Error(String(res.status));
+      const body = (await res.json()) as { sessions: Array<Omit<BoardSession, 'status' | 'seenIn' | 'subagents'>>; more: boolean };
+      const got: BoardSession[] = body.sessions.map((s) => ({ ...s, status: null, seenIn: 'transcript', subagents: [] }));
+      Object.assign(fold, { sessions: more ? [...fold.sessions, ...got] : got, more: body.more, error: '' });
+    } catch {
+      fold.error = "The hub couldn't read earlier conversations.";
+    }
+    fold.loading = false;
+    if (earlier.get(system) === fold) render();
+  }
+
+  const pastById = (id: string) => [...earlier.values()].flatMap((f) => f.sessions).find((s) => s.id === id);
 
   function rowHTML(s: BoardSession): string {
     const status = s.status ?? 'unknown';
@@ -141,6 +207,16 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
     if (project) return options.onProject(project);
     const start = pick('start');
     if (start) return void openStart(start, projectLabel(start, live.systems));
+    const fold = pick('earlier');
+    if (fold) {
+      if (!earlier.delete(fold)) {
+        earlier.set(fold, { sessions: [], more: false, loading: false, error: '', live: '' });
+        void loadEarlier(fold);
+      }
+      return render();
+    }
+    const more = pick('earlier-more');
+    if (more) return void loadEarlier(more, true);
     const menu = pick('menu');
     if (menu) {
       if (!menus.delete(menu)) menus.add(menu);
@@ -148,8 +224,10 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
     }
     const renameSession = pick('rename-session');
     if (renameSession) {
-      const s = live.sessions.find((x) => x.id === renameSession);
-      return void renameThing('session', renameSession, s ? sessionLabel(s) : renameSession);
+      const s = live.sessions.find((x) => x.id === renameSession) ?? pastById(renameSession);
+      return void renameThing('session', renameSession, s ? sessionLabel(s) : renameSession).then(() => {
+        if (s && !live.sessions.includes(s)) void loadEarlier(s.system);
+      });
     }
     const rename = pick('rename-system');
     if (rename) return void renameThing('system', rename, projectLabel(rename, live.systems));
@@ -165,6 +243,7 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
 
   return {
     render,
+    past: pastById,
     showProject(name) {
       const el = root.querySelector<HTMLElement>(`[data-project="${CSS.escape(name)}"]`);
       if (!el) return;

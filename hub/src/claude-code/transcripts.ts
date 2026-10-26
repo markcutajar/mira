@@ -40,6 +40,38 @@ export function activeSessions(projectsDir: string, sinceMs: number): Transcript
   return found;
 }
 
+export interface PastSession extends TranscriptSession {
+  title?: string;
+}
+
+let past = new Map<string, { mtimeMs: number; session: PastSession | null }>();
+
+/** Every session Claude Code still keeps a transcript for, with its title (decision 40). Cached in memory by file, never stored. */
+export function pastSessions(projectsDir: string): PastSession[] {
+  const seen = new Map<string, { mtimeMs: number; session: PastSession | null }>();
+  for (const project of list(projectsDir)) {
+    for (const file of list(join(projectsDir, project))) {
+      if (!file.endsWith('.jsonl')) continue;
+      const transcript = join(projectsDir, project, file);
+      try {
+        const stat = statSync(transcript);
+        if (!stat.isFile()) continue;
+        let read = past.get(transcript);
+        if (!read || read.mtimeMs !== stat.mtimeMs) {
+          const tail = readTail(transcript, stat.size);
+          const state = lastState(tail, transcript);
+          read = { mtimeMs: stat.mtimeMs, session: state ? { ...state, title: latestTitle(tail) } : null };
+        }
+        seen.set(transcript, read);
+      } catch {
+        // An unreadable transcript is skipped.
+      }
+    }
+  }
+  past = seen;
+  return [...seen.values()].flatMap((read) => (read.session ? [read.session] : []));
+}
+
 /** Reads the latest main-conversation message: where the session is, and whether Claude still had work in hand. */
 export function lastState(tail: string, transcript: string): TranscriptSession | null {
   const lines = tail.split('\n');

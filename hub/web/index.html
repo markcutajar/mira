@@ -78,7 +78,15 @@
   .row-title { grid-area: title; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row-meta { grid-area: meta; font: 11px var(--font-data); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row-status { color: var(--c); }
+  .row[data-status="earlier"] { --c: var(--hull-edge); }
   .row-item { position: relative; }
+  .earlier { margin-top: 2px; }
+  .earlier-toggle { all: unset; cursor: pointer; padding: 3px 6px; font: 11px var(--font-data); color: var(--dim); }
+  .earlier-toggle:hover { color: var(--ink); }
+  .earlier-toggle:focus-visible { outline: 2px solid var(--thronglet); outline-offset: 2px; }
+  .earlier .rows { margin-top: 2px; }
+  .earlier > .hint { margin: 2px 6px 4px; font-size: 11px; }
+  .earlier [data-earlier-more] { margin: 4px 6px 2px; }
   .row-rename { position: absolute; top: 4px; right: 4px; padding: 1px 7px; background: var(--hull); opacity: 0; }
   .row-item:hover .row-rename, .row-rename:focus-visible { opacity: 1; }
   @media (hover: none) { .row-rename { opacity: 1; } }

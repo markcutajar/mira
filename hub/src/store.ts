@@ -26,6 +26,7 @@ export class Store {
   #layouts: StatementSync;
   #setLayout: StatementSync;
   #clearLayout: StatementSync;
+  #spent: StatementSync;
 
   constructor(file: string) {
     if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
@@ -65,6 +66,12 @@ export class Store {
     this.#layouts = this.#db.prepare('SELECT system, layout FROM layouts');
     this.#setLayout = this.#db.prepare('INSERT INTO layouts (system, layout) VALUES (?, ?) ON CONFLICT (system) DO UPDATE SET layout = excluded.layout');
     this.#clearLayout = this.#db.prepare('DELETE FROM layouts WHERE system = ?');
+    // A subagent's tokens count towards the session that started it, as on the board.
+    this.#spent = this.#db.prepare(`SELECT COALESCE(json_extract(body, '$.actor.parent'), actor_id) AS session,
+      SUM(COALESCE(json_extract(body, '$.usage.inputTokens'), 0) + COALESCE(json_extract(body, '$.usage.outputTokens'), 0)
+        + COALESCE(json_extract(body, '$.usage.cacheReadTokens'), 0) + COALESCE(json_extract(body, '$.usage.cacheWriteTokens'), 0)) AS tokens,
+      SUM(COALESCE(json_extract(body, '$.usage.costUsd'), 0)) AS cost
+      FROM events WHERE type = 'usage.reported' AND system = ? GROUP BY session`);
     this.#prune = this.#db.prepare("DELETE FROM events WHERE at < ? AND type != 'usage.reported'");
     this.#folders = this.#db.prepare("SELECT json_extract(body, '$.detail.cwd') AS cwd FROM events WHERE system = ? AND type != 'session.moved' AND cwd IS NOT NULL GROUP BY cwd ORDER BY MAX(at) DESC LIMIT ?");
   }
@@ -94,6 +101,11 @@ export class Store {
   /** The working folders a system's events have named, most recently used first. */
   folders(system: string, limit = 20): string[] {
     return this.#folders.all(system, limit).map((row) => String(row.cwd));
+  }
+
+  /** The tokens and estimated cost of every session in a project that reported any, by session. */
+  spent(system: string): Record<string, { tokens: number; costUsd: number }> {
+    return Object.fromEntries(this.#spent.all(system).map((row) => [String(row.session), { tokens: Number(row.tokens), costUsd: Math.round(Number(row.cost) * 1e6) / 1e6 }]));
   }
 
   /** My names for projects or sessions, by key. */

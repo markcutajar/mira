@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
 import { normalise } from '../src/claude-code/normalise.ts';
 import { stableId } from '../src/claude-code/source.ts';
+import { CONTRACT_VERSION } from '../../contracts/src/index.ts';
 import { Roster } from '../src/roster.ts';
 import { createHub } from '../src/server.ts';
 import { emptyUsage, type SourceAdapter } from '../src/sources.ts';
@@ -29,6 +30,13 @@ const claude: SourceAdapter = {
   // Harmless programs stand in for `claude --resume`: one says hello and ends, the other waits for me.
   terminalFor: (s) => (s.cwd ? { file: process.execPath, args: ['-e', s.id === 's-7' ? WAITS : "process.stdout.write('hello from mira')"], cwd: process.cwd(), title: 'hello' } : null),
   startAt: (_folder, prompt) => ({ link: `vscode://claude/open?prompt=${prompt ?? ''}` }),
+  // Earlier conversations Claude Code still keeps; s-1 is on the board, so it's left out of history.
+  history: () => [
+    { sessionId: 'p-old', system: 'mira', cwd: 'C:\\code\\mira', lastAt: '2026-09-01T10:00:00.000Z', status: 'my-turn', transcript: 'C:\\t\\p-old.jsonl', title: 'Old work' },
+    { sessionId: 'p-newer', system: 'mira', cwd: 'C:\\code\\mira', lastAt: '2026-09-20T10:00:00.000Z', status: 'working', transcript: 'C:\\t\\p-newer.jsonl', title: 'Newer work' },
+    { sessionId: 's-1', system: 'mira', cwd: 'C:\\code\\mira', lastAt: '2026-09-02T10:00:00.000Z', status: 'my-turn', transcript: 'C:\\t\\s-1.jsonl' },
+    { sessionId: 'elsewhere', system: 'garden', cwd: 'C:\\code\\garden', lastAt: '2026-09-03T10:00:00.000Z', status: 'my-turn', transcript: 'C:\\t\\elsewhere.jsonl' },
+  ],
   followUp: (event, emit) => {
     if (event.type !== 'turn.ended') return;
     const { status, ...rest } = event;
@@ -165,6 +173,20 @@ describe('hub server', () => {
     assert.equal((await fetch(`${base}/api/sessions/nobody/story`)).status, 404);
     assert.equal((await fetch(`${base}/api/sessions/s-1/story`)).status, 404); // s-1 has no transcript
     assert.equal((await post('/ingest/not-a-source', { hook_event_name: 'Stop', session_id: 's-x' })).status, 404);
+  });
+
+  it("lists a project's earlier conversations, newest first, and opens them like any other", async () => {
+    store.add({ v: CONTRACT_VERSION, id: 'usage-p-old', at: '2026-09-01T10:00:00.000Z', source: 'claude-code', system: 'mira', actor: { kind: 'session', id: 'p-old' }, type: 'usage.reported', usage: { inputTokens: 100, outputTokens: 50, costUsd: 1.25 } });
+    const history = async (query = '') => (await (await fetch(`${base}/api/systems/mira/history${query}`)).json()) as { sessions: Array<{ id: string; lastAt: string }>; more: boolean };
+    const earlier = await history();
+    assert.deepEqual(earlier.sessions.map((s) => s.id), ['p-newer', 'p-old']);
+    assert.deepEqual(earlier.sessions[1], { id: 'p-old', source: 'claude-code', system: 'mira', cwd: 'C:\\code\\mira', lastAt: '2026-09-01T10:00:00.000Z', title: 'Old work', usage: { tokens: 150, costUsd: 1.25 } });
+    const first = await history('?limit=1');
+    assert.deepEqual([first.sessions.map((s) => s.id), first.more], [['p-newer'], true]);
+    assert.deepEqual((await history(`?limit=1&before=${encodeURIComponent(first.sessions[0]?.lastAt ?? '')}`)).sessions.map((s) => s.id), ['p-old']);
+    assert.equal((await fetch(`${base}/api/sessions/p-old/story`)).status, 200);
+    assert.deepEqual(await (await fetch(`${base}/api/sessions/p-old/terminal`)).json(), { available: true, running: false });
+    assert.equal((await sessions()).sessions.some((s) => s.id === 'p-old'), false); // opening it doesn't put it back on the board
   });
 
   it('names the editor window for a session, then opens the session there', async () => {

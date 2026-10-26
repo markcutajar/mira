@@ -77,6 +77,11 @@ export interface FoundSession {
   transcript: string;
 }
 
+/** An earlier session, as its source keeps it, for picking it up again (decision 40). */
+export interface PastSession extends FoundSession {
+  title?: string;
+}
+
 export interface SourceAdapter {
   /** The source's ID, as in `/ingest/<id>` and the envelope's `source`. */
   id: string;
@@ -84,6 +89,8 @@ export interface SourceAdapter {
   ingest?(payload: Record<string, unknown>, at: Date): MiraEvent | null;
   /** Sessions active since `sinceMs`, for the picture at startup. */
   discover?(sinceMs: number): FoundSession[];
+  /** Every earlier session the source still keeps, for the board's history; read when asked, never stored. */
+  history?(): PastSession[];
   /** Events that fill gaps left while the hub was stopped, such as the token use of turns that ended. */
   catchUp?(sinceMs: number): MiraEvent[];
   /** Events that follow from one just recorded, such as a turn's token use once it ends. */
