@@ -9,6 +9,13 @@ import { createHub } from '../src/server.ts';
 import { emptyUsage, type SourceAdapter } from '../src/sources.ts';
 import { Store } from '../src/store.ts';
 import { WebSocket } from 'ws';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { TerminalHost } from '../src/terminal-host.ts';
+import { Terminals } from '../src/terminals.ts';
+
+const WAITS = "process.stdout.write('ready'); process.stdin.on('data', (d) => { process.stdout.write('got ' + d); process.exit(0); })";
 
 // A stand-in for Claude Code, so these tests cover the hub and not transcript reading.
 const given = new Map<string, string>();
@@ -19,8 +26,8 @@ const claude: SourceAdapter = {
   rename: (s, name) => (s.transcript ? Boolean(given.set(s.id, name)) : false),
   story: (s, { helper }) => (s.transcript ? { sessionId: s.id, helperId: helper, usage: emptyUsage(), turns: [], earlier: 0 } : null),
   continueAt: (s) => (s.cwd ? { folder: s.cwd, link: `vscode://claude/open?session=${s.id}` } : null),
-  // A harmless program stands in for `claude --resume`.
-  terminalFor: (s) => (s.cwd ? { file: process.execPath, args: ['-e', "process.stdout.write('hello from mira')"], cwd: process.cwd(), title: 'hello' } : null),
+  // Harmless programs stand in for `claude --resume`: one says hello and ends, the other waits for me.
+  terminalFor: (s) => (s.cwd ? { file: process.execPath, args: ['-e', s.id === 's-7' ? WAITS : "process.stdout.write('hello from mira')"], cwd: process.cwd(), title: 'hello' } : null),
   startAt: (_folder, prompt) => ({ link: `vscode://claude/open?prompt=${prompt ?? ''}` }),
   followUp: (event, emit) => {
     if (event.type !== 'turn.ended') return;
@@ -33,8 +40,33 @@ const opened: string[] = [];
 const editor = { target: (folder: string) => ({ link: `vscode://file/${folder}`, name: 'mira (Workspace)' }), open: (link: string) => void opened.push(link) };
 const store = new Store(':memory:');
 const roster = new Roster();
-const hub = createHub({ store, roster, sources: [claude], placeFor: (cwd) => ({ system: 'mira', root: cwd }), permissionWaitMs: 5000, editor, editorDelayMs: 0, growth: { get: (system) => (system === 'mira' ? { commits: 12, docs: 3, workshop: 2, library: 2 } : undefined) } });
+// The terminal host runs in this process here; terminals.test.ts runs it as a process of its own.
+const home = mkdtempSync(join(tmpdir(), 'mira-hub-'));
+let host: TerminalHost | undefined;
+const terminals = () => new Terminals({ home, startHost: () => { if (!host) { host = new TerminalHost(); void host.listen(home); } } });
+const options = { store, roster, sources: [claude], placeFor: (cwd: string | undefined) => ({ system: 'mira', root: cwd }), permissionWaitMs: 5000, editor, editorDelayMs: 0 };
+const hub = createHub({ ...options, terminals: terminals(), growth: { get: (system) => (system === 'mira' ? { commits: 12, docs: 3, workshop: 2, library: 2 } : undefined) } });
 let base = '';
+
+async function listen(h: ReturnType<typeof createHub>): Promise<string> {
+  await new Promise<void>((done) => h.server.listen(0, '127.0.0.1', done));
+  return `http://127.0.0.1:${(h.server.address() as AddressInfo).port}`;
+}
+
+// A page watching a session's terminal, as the browser does.
+async function terminalPage(at: string, id: string) {
+  const ws = new WebSocket(`${at.replace('http', 'ws')}/api/sessions/${id}/terminal?cols=80&rows=24`, { headers: { Origin: at } });
+  const seen: Array<{ type: string; data?: string; running?: boolean; exitCode?: number | null }> = [];
+  ws.on('message', (raw) => void seen.push(JSON.parse(String(raw)) as (typeof seen)[number]));
+  const closed = new Promise((done) => ws.on('close', done));
+  await new Promise((done) => ws.on('open', done));
+  const output = () => seen.filter((m) => m.type === 'output').map((m) => m.data).join('');
+  const until = async (ok: () => boolean) => {
+    for (let i = 0; i < 100 && !ok(); i++) await new Promise((done) => setTimeout(done, 50));
+    assert.ok(ok(), `The terminal showed: ${JSON.stringify(output())}`);
+  };
+  return { ws, seen, closed, output, until, send: (message: unknown) => ws.send(JSON.stringify(message)) };
+}
 
 const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
   fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
@@ -56,7 +88,9 @@ describe('hub server', () => {
   });
   after(() => {
     hub.close();
+    host?.close();
     store.close();
+    rmSync(home, { recursive: true, force: true });
   });
 
   it('turns a hook payload into a stored event and a live status', async () => {
@@ -163,6 +197,29 @@ describe('hub server', () => {
       stranger.on('error', () => done('error'));
     });
     assert.equal(refused, 403);
+  });
+
+  it('keeps a terminal running while the hub restarts, and picks up where it was', async () => {
+    await post('/ingest/claude-code', { hook_event_name: 'UserPromptSubmit', session_id: 's-7', cwd: 'C:\\code\\mira', transcript_path: 'C:\\t\\s-7.jsonl' });
+    const before = createHub({ ...options, terminals: terminals() });
+    const after = createHub({ ...options, terminals: terminals() });
+    try {
+      const page = await terminalPage(await listen(before), 's-7');
+      page.send({ type: 'start' });
+      await page.until(() => page.output().includes('ready'));
+      before.close(); // the hub goes away, as in a restart
+      await page.closed;
+      const again = await listen(after);
+      assert.deepEqual(await (await fetch(`${again}/api/sessions/s-7/terminal`)).json(), { available: true, running: true });
+      const back = await terminalPage(again, 's-7');
+      await back.until(() => back.output().includes('ready')); // what it showed before, replayed
+      back.send({ type: 'input', data: 'x\r' });
+      await back.until(() => back.output().includes('got x') && back.seen.some((m) => m.type === 'state' && m.exitCode === 0));
+      back.ws.close();
+    } finally {
+      before.close();
+      after.close();
+    }
   });
 
   it('starts a new session in a project, with the prompt typed in for me', async () => {

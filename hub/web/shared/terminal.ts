@@ -88,19 +88,41 @@ export async function openTerminal(host: HTMLElement, sessionId: string, onState
 
   const state: TerminalState = { connected: false, running: false };
   const report = () => onState({ ...state });
-  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/sessions/${encodeURIComponent(sessionId)}/terminal?cols=${term.cols}&rows=${term.rows}`);
-  const send = (message: unknown) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); };
+  let socket: WebSocket | null = null;
+  let disposed = false;
+  let retry = 0;
+  let wait = 500;
+  const send = (message: unknown) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); };
 
-  socket.addEventListener('open', () => { state.connected = true; report(); });
-  socket.addEventListener('close', () => { state.connected = false; report(); });
-  socket.addEventListener('message', (e) => {
-    const message = JSON.parse(String(e.data)) as FromHub;
-    if (message.type === 'output') term.write(message.data);
-    else {
-      Object.assign(state, { running: message.running, title: message.title, exitCode: message.exitCode ?? null });
+  // The terminal runs in the hub's terminal host and outlives the hub (decision 38): when the hub
+  // restarts, connect again and draw it afresh from the recent output the host sends back.
+  function connect() {
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/sessions/${encodeURIComponent(sessionId)}/terminal?cols=${term.cols}&rows=${term.rows}`);
+    socket = ws;
+    ws.addEventListener('open', () => {
+      wait = 500;
+      term.reset();
+      state.connected = true;
       report();
-    }
-  });
+    });
+    ws.addEventListener('close', () => {
+      if (socket !== ws) return;
+      state.connected = false;
+      report();
+      if (disposed) return;
+      retry = window.setTimeout(connect, wait);
+      wait = Math.min(wait * 2, 5000);
+    });
+    ws.addEventListener('message', (e) => {
+      const message = JSON.parse(String(e.data)) as FromHub;
+      if (message.type === 'output') term.write(message.data);
+      else {
+        Object.assign(state, { running: message.running, title: message.title, exitCode: message.exitCode ?? null });
+        report();
+      }
+    });
+  }
+  connect();
   const typing = term.onData((data) => send({ type: 'input', data }));
 
   // Keep the program's idea of the size in step with the panel.
@@ -131,9 +153,11 @@ export async function openTerminal(host: HTMLElement, sessionId: string, onState
     },
     focus: () => term.focus(),
     dispose: () => {
+      disposed = true;
+      clearTimeout(retry);
       resized.disconnect();
       typing.dispose();
-      socket.close();
+      socket?.close();
       term.dispose();
     },
   };

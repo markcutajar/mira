@@ -14,6 +14,7 @@ import { shapeRecorder } from './shapes.ts';
 import type { SourceAdapter } from './sources.ts';
 import { Store } from './store.ts';
 import { makePlaceResolver } from './systems.ts';
+import { Terminals } from './terminals.ts';
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -67,6 +68,7 @@ const hub = createHub({
   },
   growth,
   editor: vscode(),
+  terminals: new Terminals({ home: miraHome }),
 });
 
 hub.server.on('error', (err: NodeJS.ErrnoException) => {

@@ -207,7 +207,7 @@ export function createPanel(options: PanelOptions): Panel {
     const session = state.id ? options.session(state.id) : undefined;
     const what = t?.title ? `<code>${esc(t.title)}</code>` : 'the session';
     let text = 'Connecting…';
-    if (t && !t.connected) text = "Not connected to the hub. Close the story and open it again.";
+    if (t && !t.connected) text = 'Reconnecting to the hub… Anything running here carries on meanwhile.';
     else if (t?.running) text = `Running ${what}. Closing the story leaves it running.`;
     else if (t && t.exitCode !== null && t.exitCode !== undefined) text = `${what} ended (exit code ${t.exitCode}).`;
     else if (t) text = `Carries this conversation on here with ${what}${session?.cwd ? `, in ${esc(folder(session.cwd))}` : ''}. If it's open in VS Code or another terminal, close it there first.`;

@@ -15,7 +15,7 @@ import type { Roster } from './roster.ts';
 import type { SourceAdapter } from './sources.ts';
 import type { Kind, Store } from './store.ts';
 import type { Place } from './systems.ts';
-import { Terminals } from './terminals.ts';
+import type { Terminals } from './terminals.ts';
 import { serveWeb, webFile } from './web.ts';
 
 type Payload = Record<string, unknown>;
@@ -33,6 +33,8 @@ export interface HubOptions {
   editorDelayMs?: number;
   /** Each project's recent commits, which grow its buildings (decision 35). */
   growth?: { get(system: string): Growth | undefined };
+  /** The way to the terminal host (decision 38); without it no session offers a terminal. */
+  terminals?: Terminals;
 }
 
 interface Viewer {
@@ -261,7 +263,7 @@ export function createHub(options: HubOptions) {
     if (route === 'GET /api/sessions') return json(res, { sessions: sessions(), pending: permissions.pending(), waitSeconds: options.permissionWaitMs / 1000 });
     if (route === 'GET /api/events') return json(res, store.recent(clamp(Number(url.searchParams.get('limit') ?? 100), 1, 500)));
     if (storyOf) return story(res, storyOf, url);
-    if (terminalOf) return terminal(res, terminalOf);
+    if (terminalOf) return void terminal(res, terminalOf);
     if (editorOf) return editor(req, res, editorOf);
     if (startOf) return void startIn(req, res, decodeName(startOf));
     if (route === 'GET /api/stream') return stream(req, res, url);
@@ -289,17 +291,18 @@ export function createHub(options: HubOptions) {
   }, HEARTBEAT_MS);
   heartbeat.unref();
 
-  // Terminals (decision 36): GET /api/sessions/<id>/terminal says whether a session can have one and
-  // whether it's running; the WebSocket at the same address carries it, with the same checks as
-  // every other request, so no other site can reach it.
-  const terminals = new Terminals();
+  // Terminals (decisions 36 and 38): GET /api/sessions/<id>/terminal says whether a session can have
+  // one and whether it's running; the WebSocket at the same address carries it, relayed to the
+  // terminal host, with the same checks as every other request, so no other site can reach it.
+  const terminals = options.terminals;
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   const terminalSpec = (id: string) => {
     const session = roster.get(id);
-    return session ? (sources.get(session.source)?.terminalFor?.(session) ?? null) : null;
+    return session && terminals ? (sources.get(session.source)?.terminalFor?.(session) ?? null) : null;
   };
-  function terminal(res: ServerResponse, id: string) {
-    json(res, { available: Boolean(terminalSpec(id)), running: terminals.running(id) });
+  async function terminal(res: ServerResponse, id: string) {
+    const available = Boolean(terminalSpec(id));
+    json(res, { available, running: available && terminals ? await terminals.running(id) : false });
   }
   server.on('upgrade', (req, socket, head) => {
     const port = (server.address() as AddressInfo).port;
@@ -310,13 +313,14 @@ export function createHub(options: HubOptions) {
       return;
     }
     const size = { cols: clamp(Number(url.searchParams.get('cols') ?? 100), 10, 500), rows: clamp(Number(url.searchParams.get('rows') ?? 30), 5, 200) };
-    sockets.handleUpgrade(req, socket, head, (ws) => terminals.attach(id, ws, terminalSpec(id), size));
+    sockets.handleUpgrade(req, socket, head, (ws) => terminals?.attach(id, ws, terminalSpec(id), size));
   });
 
   function close() {
     clearInterval(heartbeat);
     clearInterval(watch);
-    terminals.closeAll();
+    terminals?.closeAll();
+    for (const page of sockets.clients) page.close(1012, 'The hub is restarting.');
     sockets.close();
     for (const viewer of viewers.values()) viewer.res.end();
     viewers.clear();

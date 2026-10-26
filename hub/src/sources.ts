@@ -4,7 +4,15 @@
 
 import type { MiraEvent, Status } from '../../contracts/src/index.ts';
 import type { SessionView } from './roster.ts';
-import type { TerminalSpec } from './terminals.ts';
+
+/** How to run a session's own resume command in a terminal (decision 36). */
+export interface TerminalSpec {
+  file: string;
+  args: string[];
+  cwd: string;
+  /** What the page shows it's running, e.g. `claude --resume 673391f2`. */
+  title: string;
+}
 
 export interface UsageTotals {
   input: number;

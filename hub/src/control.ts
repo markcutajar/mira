@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, miraHome } from './config.ts';
+import { runningTerminals, stopTerminalHost } from './terminals.ts';
 
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url));
 const SELF = fileURLToPath(import.meta.url);
@@ -58,7 +59,7 @@ async function start(): Promise<void> {
   }
 }
 
-async function stop(): Promise<void> {
+async function stopHub(): Promise<void> {
   const running = pid();
   if (!running) {
     console.log((await answering()) ? `A hub is answering at ${url}, but it wasn't started in the background. Stop it where it runs.` : "The hub isn't running.");
@@ -69,12 +70,23 @@ async function stop(): Promise<void> {
   console.log((await waitFor(false)) ? 'The hub has stopped.' : `The hub was asked to stop but still answers at ${url}.`);
 }
 
+// Stopping ends the terminals too; restarting leaves them running (decision 38).
+async function stop(): Promise<void> {
+  await stopHub();
+  const ended = await stopTerminalHost(miraHome);
+  if (ended) console.log(`Ended ${plural(ended, 'terminal')}. ${ended === 1 ? 'Its conversation is' : 'Their conversations are'} kept, ready to resume.`);
+}
+
 async function status(): Promise<void> {
   const up = await answering();
   const running = pid();
   console.log(up ? `The hub is running at ${url}${running ? ` in the background (process ${running}), logging to ${LOG}` : ', in a terminal'}.` : "The hub isn't running.");
+  const terminals = await runningTerminals(miraHome);
+  if (terminals?.length) console.log(`${plural(terminals.length, 'terminal')} running in the terminal host, carrying on through restarts until the hub is stopped.`);
   console.log(existsSync(startupFile()) ? 'It starts at login.' : "It doesn't start at login. Turn that on with: npm run hub:login");
 }
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // A one-line script in the Windows Startup folder needs no admin rights; at login it starts the
 // hub in the background and closes, so a console window flashes up for a moment.
@@ -106,7 +118,7 @@ function login(on: boolean): void {
 const COMMANDS: Record<string, () => unknown> = {
   start,
   stop,
-  restart: async () => { await stop(); await start(); },
+  restart: async () => { await stopHub(); await start(); },
   status,
   login: () => login(true),
   'login-off': () => login(false),

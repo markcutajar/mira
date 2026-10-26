@@ -1,132 +1,166 @@
-// Terminals the page opens on a session (decision 36): the source's own command, such as
-// `claude --resume`, running in a pseudo-terminal the hub owns and shown in the browser with
-// xterm.js. A terminal keeps running when the page closes, and picks up where it was when the
-// page comes back. What I type goes straight to the program; Mira never types anything itself.
+// The hub's side of the terminals (decisions 36 and 38). The terminal host runs them, in a process
+// of its own, so they outlive the hub; the hub starts the host when a page first needs it and relays
+// each page's WebSocket to it. When the hub restarts, the page reconnects and picks up where it was.
 
-import * as pty from '@lydell/node-pty';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync } from 'node:fs';
+import { connect, type Socket } from 'node:net';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { WebSocket } from 'ws';
+import { endpoint, hostFile, line, onLines, PAGE_MESSAGES, type FromHost, type TerminalSpec, type ToHost } from './terminal-protocol.ts';
 
-export interface TerminalSpec {
-  file: string;
-  args: string[];
-  cwd: string;
-  /** What the page shows it's running, e.g. `claude --resume 673391f2`. */
-  title: string;
+export type { TerminalSpec } from './terminal-protocol.ts';
+
+const HOST = fileURLToPath(new URL('./terminal-host.ts', import.meta.url));
+const MAX_LOG = 1024 * 1024;
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+export interface TerminalsOptions {
+  /** The Mira home, which says where the host listens. */
+  home: string;
+  /** Starts the host; by default as a hidden process of its own, which outlives the hub. */
+  startHost?: () => void;
 }
-
-interface Running {
-  process: pty.IPty;
-  title: string;
-  /** Recent output, replayed to a page that connects later. */
-  output: string;
-  viewers: Set<WebSocket>;
-  exitCode: number | null;
-}
-
-/** What the page and the hub send each other over the terminal's WebSocket, as JSON. */
-type FromPage = { type: 'input'; data: string } | { type: 'resize'; cols: number; rows: number } | { type: 'start' } | { type: 'stop' };
-type ToPage = { type: 'state'; running: boolean; title?: string; exitCode?: number | null } | { type: 'output'; data: string };
-
-const REPLAY_CHARS = 200_000;
-const clampSize = (n: unknown, fallback: number) => (typeof n === 'number' && Number.isFinite(n) ? Math.max(10, Math.min(500, Math.round(n))) : fallback);
 
 export class Terminals {
-  #by = new Map<string, Running>();
+  #home: string;
+  #startHost: () => void;
+  #starting: Promise<boolean> | null = null;
+  #links = new Set<Socket>();
 
-  /** True while a session's terminal program is still running. */
-  running(id: string): boolean {
-    const t = this.#by.get(id);
-    return Boolean(t && t.exitCode === null);
+  constructor(options: TerminalsOptions) {
+    this.#home = options.home;
+    this.#startHost = options.startHost ?? (() => startHostProcess(options.home));
   }
 
-  /** Connects a page to a session's terminal; `spec` says how to start it if it isn't running. */
-  attach(id: string, socket: WebSocket, spec: TerminalSpec | null, size: { cols: number; rows: number }): void {
-    const send = (message: ToPage) => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message)); };
-    const state = () => {
-      const t = this.#by.get(id);
-      send({ type: 'state', running: this.running(id), title: t?.title ?? spec?.title, exitCode: t?.exitCode ?? null });
-    };
-    const join = (t: Running) => {
-      t.viewers.add(socket);
-      if (t.output) send({ type: 'output', data: t.output });
-      // A size change makes a full-screen program draw itself again for the new viewer.
-      if (t.exitCode === null) t.process.resize(size.cols, size.rows);
-    };
+  /** True while a session's terminal program is still running. */
+  async running(id: string): Promise<boolean> {
+    return (await runningTerminals(this.#home))?.includes(id) ?? false;
+  }
 
-    const current = this.#by.get(id);
-    if (current) join(current);
-    state();
-
-    socket.on('message', (raw) => {
-      let message: FromPage;
+  /** Relays a page to a session's terminal; `spec` says how to start it if it isn't running. */
+  attach(id: string, page: WebSocket, spec: TerminalSpec | null, size: { cols: number; rows: number }): void {
+    let link: Socket | null = null;
+    let closed = false;
+    const waiting: string[] = [];
+    page.on('message', (raw) => {
+      let message: { type?: unknown };
       try {
-        message = JSON.parse(String(raw)) as FromPage;
+        message = JSON.parse(String(raw)) as { type?: unknown };
       } catch {
         return;
       }
-      const t = this.#by.get(id);
-      if (message.type === 'input' && typeof message.data === 'string' && t?.exitCode === null) t.process.write(message.data);
-      else if (message.type === 'resize') {
-        size = { cols: clampSize(message.cols, size.cols), rows: clampSize(message.rows, size.rows) };
-        if (t?.exitCode === null) t.process.resize(size.cols, size.rows);
-      } else if (message.type === 'start' && spec && !this.running(id)) {
-        // Anyone else watching the old, finished run watches the new one too.
-        const next = this.#start(id, spec, size);
-        for (const viewer of t?.viewers ?? []) next.viewers.add(viewer);
-        next.viewers.add(socket);
-        const started = JSON.stringify({ type: 'state', running: true, title: next.title, exitCode: null } satisfies ToPage);
-        for (const viewer of next.viewers) if (viewer.readyState === viewer.OPEN) viewer.send(started);
-      } else if (message.type === 'stop') this.stop(id);
+      // Only what a page may say about its own terminal goes on to the host.
+      if (typeof message?.type !== 'string' || !PAGE_MESSAGES.has(message.type)) return;
+      const text = line(message as ToHost);
+      if (link) link.write(text);
+      else waiting.push(text);
     });
-    socket.on('close', () => this.#by.get(id)?.viewers.delete(socket));
+    page.on('error', () => {});
+    page.on('close', () => {
+      closed = true;
+      link?.end();
+    });
+
+    void this.#host().then((socket) => {
+      if (!socket) return void page.close(1011, "The terminal host didn't start.");
+      if (closed) return void socket.end();
+      link = socket;
+      this.#links.add(socket);
+      socket.write(line({ type: 'attach', id, spec, ...size }));
+      for (const text of waiting.splice(0)) socket.write(text);
+      onLines(socket, (text) => { if (page.readyState === page.OPEN) page.send(text); });
+      socket.on('close', () => {
+        this.#links.delete(socket);
+        if (page.readyState === page.OPEN) page.close();
+      });
+    });
   }
 
-  stop(id: string): void {
-    const t = this.#by.get(id);
-    if (t?.exitCode === null) t.process.kill();
-  }
-
+  /** Lets go of every page's link, as the hub stops; the terminals carry on in the host. */
   closeAll(): void {
-    for (const t of this.#by.values()) {
-      if (t.exitCode === null) t.process.kill();
-      for (const viewer of t.viewers) viewer.close();
-    }
-    this.#by.clear();
+    for (const socket of this.#links) socket.end();
+    this.#links.clear();
   }
 
-  #start(id: string, spec: TerminalSpec, size: { cols: number; rows: number }): Running {
-    const process_ = pty.spawn(spec.file, spec.args, {
-      name: 'xterm-256color',
-      cols: size.cols,
-      rows: size.rows,
-      cwd: spec.cwd,
-      env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>,
-    });
-    const t: Running = { process: process_, title: spec.title, output: '', viewers: new Set(), exitCode: null };
-    this.#by.set(id, t);
-    process_.onData((data) => {
-      t.output = (t.output + data).slice(-REPLAY_CHARS);
-      const message = JSON.stringify({ type: 'output', data } satisfies ToPage);
-      for (const viewer of t.viewers) if (viewer.readyState === viewer.OPEN) viewer.send(message);
-    });
-    process_.onExit(({ exitCode }) => {
-      t.exitCode = exitCode;
-      const message = JSON.stringify({ type: 'state', running: false, title: t.title, exitCode } satisfies ToPage);
-      for (const viewer of t.viewers) if (viewer.readyState === viewer.OPEN) viewer.send(message);
-      setTimeout(() => release(process_), 1000).unref(); // after the last output has flushed
-    });
-    return t;
+  // A connection of its own for each page; the host is started once, however many pages ask at once.
+  async #host(): Promise<Socket | null> {
+    const open = await openHost(this.#home);
+    if (open) return open;
+    this.#starting ??= (async () => {
+      this.#startHost();
+      for (let i = 0; i < 60; i++) {
+        await sleep(100);
+        const probe = await openHost(this.#home);
+        probe?.destroy();
+        if (probe) return true;
+      }
+      return false;
+    })().finally(() => { this.#starting = null; });
+    return (await this.#starting) ? openHost(this.#home) : null;
   }
 }
 
-// On Windows, node-pty leaves its input socket and output worker open after the program ends,
-// which would keep them around for the hub's lifetime; let them go.
-function release(terminal: pty.IPty): void {
-  const agent = (terminal as unknown as { _agent?: { _inSocket?: { destroy(): void }; _conoutSocketWorker?: { dispose(): void } } })._agent;
+/** The sessions whose terminals are running, or null when no host is. */
+export async function runningTerminals(home: string): Promise<string[] | null> {
+  const reply = await ask(home, { type: 'list' });
+  return reply?.type === 'list' ? reply.running : null;
+}
+
+/** Ends the host and every terminal in it; resolves how many were running, or null if no host was. */
+export async function stopTerminalHost(home: string): Promise<number | null> {
+  const reply = await ask(home, { type: 'shutdown' });
+  return reply?.type === 'list' ? reply.running.length : null;
+}
+
+async function ask(home: string, message: ToHost): Promise<FromHost | null> {
+  const socket = await openHost(home);
+  if (!socket) return null;
+  return new Promise((done) => {
+    const timer = setTimeout(() => { socket.destroy(); done(null); }, 2000);
+    onLines(socket, (text) => {
+      clearTimeout(timer);
+      socket.end();
+      try {
+        done(JSON.parse(text) as FromHost);
+      } catch {
+        done(null);
+      }
+    });
+    socket.on('close', () => { clearTimeout(timer); done(null); });
+    socket.write(line(message));
+  });
+}
+
+/** Connects to the running host and signs in, or resolves null if there isn't one. */
+function openHost(home: string): Promise<Socket | null> {
+  let token: string;
   try {
-    agent?._conoutSocketWorker?.dispose();
-    agent?._inSocket?.destroy();
+    token = (JSON.parse(readFileSync(hostFile(home), 'utf8')) as { token: string }).token;
   } catch {
-    // Best effort: these are node-pty's own fields, and may change.
+    return Promise.resolve(null);
   }
+  return new Promise((done) => {
+    const socket = connect(endpoint(home));
+    socket.on('error', () => done(null));
+    socket.once('connect', () => {
+      socket.write(line({ type: 'hello', token }));
+      done(socket);
+    });
+  });
+}
+
+function startHostProcess(home: string): void {
+  mkdirSync(home, { recursive: true });
+  const logFile = join(home, 'terminals.log');
+  if (existsSync(logFile) && statSync(logFile).size > MAX_LOG) renameSync(logFile, `${logFile}.1`);
+  const log = openSync(logFile, 'a');
+  const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', HOST], {
+    detached: true,
+    windowsHide: true,
+    stdio: ['ignore', log, log],
+    env: { ...process.env, MIRA_HOME: home },
+  });
+  child.unref();
 }
