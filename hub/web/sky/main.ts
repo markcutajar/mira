@@ -1,30 +1,39 @@
-// Starts the sky: connects to the hub, draws the island with Phaser, opens a session's story when
-// a mirling is clicked, and a project's card when its name is clicked.
+// Starts Mira's page (decision 31): the island drawn with Phaser, the board down the left, and a
+// session's story on the right. A session row or a mirling opens its story; a project's name on
+// either side finds it on the other.
 
-import { ago, clock, esc, projectLabel, sessionLabel, STATUS_LABEL } from '../shared/format.ts';
+import { clock, esc, projectLabel } from '../shared/format.ts';
 import { connectLive } from '../shared/live.ts';
-import { removeThing, renameThing } from '../shared/manage.ts';
 import { createPanel, linkedSession } from '../shared/panel.ts';
-import { openStart } from '../shared/start.ts';
 import { drawnArt } from './drawn-art.ts';
 import { SkyScene } from './scene.ts';
+import { createSidebar } from './sidebar.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const DPR = () => Math.min(window.devicePixelRatio || 1, 3);
-const ORDER = ['needs-me', 'failed', 'my-turn', 'working', 'ended', null];
+const SIDE_KEY = 'mira.side';
+const hud = $('hud');
+const side = $('sidebar');
+const toggle = $<HTMLButtonElement>('side-toggle');
 const skyEl = $('sky');
-const card = $('project-card');
 const zoomIn = $<HTMLButtonElement>('zoom-in');
 const zoomOut = $<HTMLButtonElement>('zoom-out');
-let cardFor: string | null = null;
+
+const sideShown = () => !hud.classList.contains('folded');
+const openPanel = () => document.querySelector<HTMLElement>('.panel:not([hidden])');
 
 const scene = new SkyScene({
   art: drawnArt(),
-  insets: () => ({ top: $('hud-top').getBoundingClientRect().bottom + 8, bottom: window.innerHeight - $('hud-bottom').getBoundingClientRect().top }),
+  insets: () => ({
+    top: $('hud-top').getBoundingClientRect().bottom + 8,
+    bottom: window.innerHeight - $('hud-bottom').getBoundingClientRect().top,
+    left: sideShown() ? side.getBoundingClientRect().right + 8 : 0,
+    right: openPanel()?.getBoundingClientRect().width ?? 0,
+  }),
   onSelect: (id) => panel.open(id),
   onSection: (name) => {
-    cardFor = name;
-    renderCard();
+    setSide(true);
+    sidebar.showProject(name);
   },
   onZoom: (name, closer, further) => {
     $('zoom-label').textContent = name;
@@ -38,18 +47,34 @@ const panel = createPanel({
   pending: () => live.pending,
   waitSeconds: () => live.waitSeconds,
   projectLabel: (system) => projectLabel(system, live.systems),
-  onChange: (id) => scene.select(id, document.querySelector('.panel')?.getBoundingClientRect().width ?? 0),
+  onChange: (id) => {
+    scene.select(id);
+    if (id) scene.reveal(id);
+    sidebar.render();
+  },
 });
 
+// The live link only calls back once data arrives, by which time the side panel below exists.
 const live = connectLive({
   hold: $<HTMLInputElement>('hold'),
   onConnection: renderConnection,
   // Projects arrive first, in the order they first appeared, so the island keeps its shape between visits.
-  onSystems: () => { syncScene(); renderCard(); panel.refresh(); },
-  onSessions: () => { syncScene(); renderCounts(); renderCard(); panel.refresh(); },
-  onPending: () => { renderCounts(); panel.refresh(); },
+  onSystems: () => { syncScene(); sidebar.render(); panel.refresh(); },
+  onSessions: () => { syncScene(); renderCounts(); sidebar.render(); panel.refresh(); },
+  onPending: () => { renderCounts(); sidebar.render(); panel.refresh(); },
   onEvent: (event) => { scene.event(event); panel.event(event); },
   onEvents: renderEvents,
+});
+
+const sidebar = createSidebar(side, {
+  live,
+  current: () => panel.current(),
+  onSession: (id) => {
+    panel.open(id);
+    scene.focusSession(id);
+  },
+  onProject: (name) => scene.focusSection(name),
+  onRemoved: (kind, key) => { if (kind === 'system') scene.forget(key); },
 });
 
 function syncScene() {
@@ -72,70 +97,31 @@ function renderCounts() {
   const chip = $<HTMLButtonElement>('chip-needs');
   chip.classList.toggle('on', needs > 0);
   chip.disabled = needs === 0;
-  document.title = needs ? `(${needs}) Mira Sky` : 'Mira Sky';
+  document.title = needs ? `(${needs}) Mira` : 'Mira';
 }
-
-// A project's card: its sessions and where each stands, and what I can do with the project.
-function renderCard() {
-  const system = cardFor;
-  card.hidden = !system;
-  if (!system) return;
-  const name = projectLabel(system, live.systems);
-  const sessions = live.sessions.filter((s) => s.system === system)
-    .sort((a, b) => ORDER.indexOf(a.status ?? null) - ORDER.indexOf(b.status ?? null) || b.lastAt.localeCompare(a.lastAt));
-  const rows = sessions.map((s) => `<li>
-      <span class="pill" data-status="${esc(s.status ?? 'unknown')}">${STATUS_LABEL[s.status ?? ''] ?? 'Unknown'}</span>
-      <button type="button" class="title-btn" data-open="${esc(s.id)}" title="Open this session's story">${esc(sessionLabel(s))}</button>
-      <span class="faint" data-since="${esc(s.lastAt)}">${esc(ago(s.lastAt))}</span>
-    </li>`).join('');
-  card.innerHTML = `<header class="card-head">
-      <div><p class="eyebrow">Project</p><h2${name !== system ? ` title="${esc(system)}"` : ''}>${esc(name)}</h2></div>
-      <button type="button" class="ghost small" data-card="close" aria-label="Close the project card">Close</button>
-    </header>
-    ${rows ? `<ul class="card-sessions">${rows}</ul>` : '<p class="hint">No sessions here right now.</p>'}
-    <div class="actions">
-      <button type="button" class="go small" data-card="start">+ New session</button>
-      <button type="button" class="ghost small" data-card="rename">Rename</button>
-      <button type="button" class="ghost small" data-card="remove">Remove</button>
-    </div>`;
-}
-
-card.addEventListener('click', (e) => {
-  const target = e.target as HTMLElement;
-  const system = cardFor;
-  if (!system) return;
-  const name = projectLabel(system, live.systems);
-  const session = (target.closest('[data-open]') as HTMLElement | null)?.dataset.open;
-  if (session) return panel.open(session);
-  const action = (target.closest('[data-card]') as HTMLElement | null)?.dataset.card;
-  if (action === 'close') {
-    cardFor = null;
-    renderCard();
-  } else if (action === 'start') {
-    void openStart(system, name);
-  } else if (action === 'rename') {
-    void renameThing('system', system, name);
-  } else if (action === 'remove') {
-    void removeThing('system', system, name).then((done) => {
-      if (!done) return;
-      scene.forget(system);
-      cardFor = null;
-      renderCard();
-    });
-  }
-});
-setInterval(() => {
-  for (const el of card.querySelectorAll<HTMLElement>('[data-since]')) el.textContent = ago(el.dataset.since as string);
-}, 15000);
 
 function renderEvents() {
   // Token reports arrive after every turn and would crowd out what's happening.
   $('events').innerHTML = live.events.filter((e) => e.type !== 'usage.reported').slice(0, 4).map((e) => {
-    const who = e.actor.kind === 'subagent' ? `${projectLabel(e.system, live.systems)} › ${e.actor.name || 'subagent'}` : projectLabel(e.system, live.systems);
+    const project = projectLabel(e.system, live.systems);
+    const who = e.actor.kind === 'subagent' ? `${project} › ${e.actor.name || 'subagent'}` : project;
     const what = e.detail?.tool ?? e.detail?.notification ?? e.detail?.reason ?? e.detail?.decision ?? '';
     return `<li><span class="t">${esc(clock(e.at))}</span><span class="who">${esc(who)}</span><span class="type">${esc(e.type)}</span><span class="what">${esc(what)}</span></li>`;
   }).join('');
 }
+
+// The side panel folds away for more island; folded on narrow screens unless I opened it.
+function setSide(shown: boolean, remember = true) {
+  if (shown === sideShown()) return;
+  hud.classList.toggle('folded', !shown);
+  toggle.setAttribute('aria-pressed', String(shown));
+  if (remember) try { localStorage.setItem(SIDE_KEY, shown ? 'open' : 'folded'); } catch { /* not remembered */ }
+  requestAnimationFrame(() => scene.relayout());
+}
+let remembered: string | null = null;
+try { remembered = localStorage.getItem(SIDE_KEY); } catch { /* storage unavailable */ }
+setSide(remembered ? remembered === 'open' : window.innerWidth > 900, false);
+toggle.addEventListener('click', () => setSide(!sideShown()));
 
 $('chip-needs').addEventListener('click', () => {
   const id = scene.focusNextNeeds();

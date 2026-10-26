@@ -1,6 +1,7 @@
-// Serves the browser side: the board and sky pages, the shared styles and modules, the sky's
-// modules and Phaser. TypeScript goes out as JavaScript with its types stripped (decision 26),
-// so there's no build step. Files are read on every request, so `npm run dev` picks up changes.
+// Serves the browser side: the page (the sky, with the board down its left, decision 31), the
+// shared styles and modules, the sky's modules and Phaser. TypeScript goes out as JavaScript with
+// its types stripped (decision 26), so there's no build step. Files are read on every request, so
+// `npm run dev` picks up changes.
 
 import { readFile, stat } from 'node:fs/promises';
 import { stripTypeScriptTypes } from 'node:module';
@@ -11,8 +12,8 @@ export const PAGE_POLICY = "default-src 'self'; script-src 'self' 'unsafe-inline
 const WEB = new URL('../web/', import.meta.url);
 const SCRIPT = 'text/javascript; charset=utf-8';
 const FIXED: Record<string, { file: URL; type: string }> = {
-  '/': { file: new URL('board.html', WEB), type: 'text/html; charset=utf-8' },
-  '/sky': { file: new URL('sky.html', WEB), type: 'text/html; charset=utf-8' },
+  '/': { file: new URL('index.html', WEB), type: 'text/html; charset=utf-8' },
+  '/sky': { file: new URL('index.html', WEB), type: 'text/html; charset=utf-8' }, // the address the sky had before
   '/markdown.js': { file: new URL('markdown.js', WEB), type: SCRIPT },
   '/vendor/phaser.js': { file: new URL('../../node_modules/phaser/dist/phaser.min.js', import.meta.url), type: SCRIPT },
 };

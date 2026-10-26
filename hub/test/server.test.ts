@@ -152,19 +152,21 @@ describe('hub server', () => {
     assert.deepEqual((await sessions()).sessions.find((s) => s.id === 's-6')?.usage, { tokens: 30, costUsd: 0.5 });
   });
 
-  it('serves the status board', async () => {
+  it('serves the page: the sky with the board down its left', async () => {
     const res = await fetch(`${base}/`);
     assert.equal(res.status, 200);
     assert.match(res.headers.get('content-security-policy') ?? '', /default-src 'self'/);
-    assert.match(await res.text(), /<title>Mira<\/title>/);
+    const page = await res.text();
+    assert.match(page, /<title>Mira<\/title>/);
+    assert.match(page, /id="sidebar"/);
     const script = await fetch(`${base}/markdown.js`);
     assert.equal(script.status, 200);
     assert.match(script.headers.get('content-type') ?? '', /javascript/);
     assert.equal((await fetch(`${base}/toString`)).status, 404);
   });
 
-  it('serves the sky, its modules with their types stripped, and Phaser', async () => {
-    assert.match(await (await fetch(`${base}/sky`)).text(), /<title>Mira Sky<\/title>/);
+  it('serves the page at its old sky address too, its modules with their types stripped, and Phaser', async () => {
+    assert.match(await (await fetch(`${base}/sky`)).text(), /id="sidebar"/);
     const module = await fetch(`${base}/shared/format.ts`);
     assert.match(module.headers.get('content-type') ?? '', /javascript/);
     const code = await module.text();

@@ -4,30 +4,29 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
-<title>Mira Sky</title>
+<title>Mira</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Pixelify+Sans:wght@400;600&display=swap">
 <link rel="stylesheet" href="/shared/mira.css">
 <style>
-  /* The sky (build plan step 5): the island fills the window; the HUD floats above it. */
+  /* Mira (decision 31): the island fills the window, the board runs down the left, the story opens on the right. */
   html, body { height: 100%; }
   body { overflow: hidden; }
   #sky { position: fixed; inset: 0; }
   #sky canvas { display: block; }
   .fallback { margin: 0; padding: 24px; max-width: 60ch; color: var(--dim); }
 
-  .hud { position: fixed; inset: 0; z-index: 1; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; gap: 10px; padding: 12px 16px; }
-  .hud-top, .hud-bottom { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
-  .hud-top { align-items: flex-start; }
-  .hud-bottom { align-items: flex-end; }
+  .hud { --side: 360px; position: fixed; inset: 0; z-index: 1; pointer-events: none; display: grid; grid-template-columns: var(--side) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; gap: 10px 12px; padding: 12px 16px; }
+  .hud.folded { --side: 0px; column-gap: 0; }
+  .hud-top { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .hud-middle { grid-column: 2; grid-row: 2; min-height: 0; display: flex; }
+  .hud-bottom { grid-column: 2; grid-row: 3; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 10px; }
   .glass { background: var(--hull-glass); border: 2px solid var(--hull-edge); box-shadow: 0 0 0 2px var(--void), inset 0 2px 0 var(--hull-shine); pointer-events: auto; }
 
-  .brand { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; padding: 7px 12px 8px; }
+  .brand { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 6px 8px 6px 12px; }
   .wordmark { font-family: var(--font-display); font-weight: 600; font-size: 22px; letter-spacing: 0.08em; color: var(--thronglet); }
-  .sub { font-family: var(--font-display); font-size: 14px; color: var(--dim); }
-  .switch { font-family: var(--font-display); font-size: 14px; color: var(--turn); text-decoration: none; }
-  .switch:hover { color: var(--thronglet); }
+  .brand .ghost[aria-pressed="true"] { color: var(--ink); border-color: var(--thronglet); }
 
   .chips { display: flex; flex-wrap: wrap; gap: 6px; pointer-events: auto; }
   .chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; font-family: var(--font-display); font-size: 13px; color: var(--ink); }
@@ -45,19 +44,48 @@
   .conn::before { content: ""; width: 8px; height: 8px; background: var(--working); }
   .conn[data-state="down"]::before { background: var(--failed); }
 
-  .hud-middle { flex: 1; min-height: 0; display: flex; align-items: flex-start; gap: 10px; }
-  .empty { max-width: 46ch; margin: auto; padding: 14px 16px; color: var(--dim); text-align: center; }
-
-  .project-card { width: min(360px, 100%); max-height: 100%; overflow: auto; padding: 12px 14px 14px; display: grid; gap: 10px; }
-  .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-  .card-head .eyebrow { margin: 0 0 2px; }
-  .card-head h2 { margin: 0; font: 600 18px var(--font-display); overflow-wrap: anywhere; }
-  .card-sessions { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-  .card-sessions li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline; font-size: 13px; }
-  .card-sessions .faint { font: 11px var(--font-data); }
-  .title-btn { all: unset; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The board, condensed down the left. */
+  .sidebar { grid-column: 1; grid-row: 2 / 4; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px; }
+  .hud.folded .sidebar { display: none; }
+  .side-prompts { display: grid; gap: 8px; }
+  .side-prompts .eyebrow { margin: 0; }
+  .side-prompts .prompt { padding: 10px 12px; }
+  .side-prompts .prompt-title { margin: 6px 0; font-size: 13.5px; }
+  .side-prompts .cmd { margin: 0 0 8px; }
+  .side-empty { margin: 4px 0; }
+  .proj { padding-top: 8px; border-top: 1px solid var(--hull-edge); }
+  .side-prompts + .proj, .proj:first-child { padding-top: 0; border-top: 0; }
+  .proj.flash { animation: flash 1.4s ease-out; }
+  @keyframes flash { from { background: rgba(255, 211, 77, 0.2); } to { background: transparent; } }
+  .proj-head { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "name new menu" "meta new menu"; column-gap: 6px; align-items: center; }
+  .proj-name { all: unset; grid-area: name; cursor: pointer; font: 600 15px var(--font-display); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .proj-name:hover { color: var(--thronglet); }
+  .proj-name:focus-visible { outline: 2px solid var(--thronglet); outline-offset: 2px; }
+  .proj.quiet .proj-name { color: var(--dim); font-size: 13px; }
+  .proj-meta { grid-area: meta; font: 11px var(--font-data); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .proj-head [data-start] { grid-area: new; }
+  .proj-head [data-menu] { grid-area: menu; }
+  .proj-menu { display: flex; gap: 6px; margin-top: 6px; }
+  .needs { color: var(--beacon); }
+  .rows { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; }
+  .row { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 10px minmax(0, 1fr); grid-template-areas: "dot title" ". meta"; column-gap: 8px; width: 100%; padding: 5px 6px; cursor: pointer; }
+  .row:hover { background: rgba(255, 255, 255, 0.04); }
+  .row.open { background: rgba(255, 211, 77, 0.1); box-shadow: inset 2px 0 0 var(--thronglet); }
+  .row:focus-visible { outline: 2px solid var(--thronglet); outline-offset: -2px; }
+  .dot { grid-area: dot; width: 8px; height: 8px; margin-top: 6px; background: var(--c); }
+  .row[data-status="needs-me"] .dot { animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0.25; } }
+  .row-title { grid-area: title; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-meta { grid-area: meta; font: 11px var(--font-data); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-status { color: var(--c); }
+  .badge { margin-left: 6px; padding: 0 5px; border: 1px solid var(--hull-edge); font: 10px var(--font-data); color: var(--dim); vertical-align: 1px; }
+  .badge.tree { border-color: var(--turn); color: var(--turn); }
+  .badge[data-mode="bypassPermissions"] { border-color: var(--failed); color: var(--failed); }
+  .title-btn { all: unset; cursor: pointer; }
   .title-btn:hover { color: var(--thronglet); }
   .title-btn:focus-visible { outline: 2px solid var(--thronglet); outline-offset: 2px; }
+
+  .empty { max-width: 46ch; margin: auto; padding: 14px 16px; color: var(--dim); text-align: center; }
 
   .stream { width: min(560px, 100%); min-width: 0; padding: 8px 12px 10px; }
   .stream-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; margin-bottom: 6px; }
@@ -75,6 +103,10 @@
   .zoom button:disabled { color: var(--hull-edge); cursor: default; }
   .zoom span { min-width: 10ch; text-align: center; font-family: var(--font-display); font-size: 13px; }
 
+  @media (max-width: 900px) {
+    .hud { --side: min(340px, calc(100vw - 32px)); }
+    .hud:not(.folded) .hud-middle, .hud:not(.folded) .hud-bottom { display: none; }
+  }
   @media (max-width: 640px) {
     .chips { flex-basis: 100%; }
     .chip { padding: 5px 8px; font-size: 12px; }
@@ -83,15 +115,15 @@
     #events li:nth-child(n+3) { display: none; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .chip.on { animation: none; }
+    .chip.on, .row[data-status="needs-me"] .dot, .proj.flash { animation: none; }
   }
 </style>
 </head>
 <body>
 <div id="sky" aria-label="Island map"></div>
-<div class="hud">
+<div class="hud" id="hud">
   <header class="hud-top" id="hud-top">
-    <div class="brand glass"><span class="wordmark">MIRA</span><span class="sub">Sky</span><a class="switch" href="/">Board →</a></div>
+    <div class="brand glass"><span class="wordmark">MIRA</span><button type="button" class="ghost small" id="side-toggle" aria-pressed="true" aria-controls="sidebar" title="Show or hide the projects and sessions">☰ Sessions</button></div>
     <nav class="chips" aria-label="Sessions by status">
       <span class="chip glass" data-status="working"><i></i>Working <b id="n-working">0</b></span>
       <button type="button" class="chip glass" id="chip-needs" data-status="needs-me" title="Go to the next mirling that needs you" disabled><i></i>Needs you <b id="n-needs-me">0</b></button>
@@ -103,13 +135,13 @@
       <span class="conn" id="conn" data-state="down" role="status">Connecting…</span>
     </div>
   </header>
+  <aside class="sidebar glass" id="sidebar" aria-label="Projects and sessions"></aside>
   <div class="hud-middle">
-    <aside class="project-card glass" id="project-card" aria-label="Project" hidden></aside>
     <p class="empty glass" id="empty" hidden>No projects yet. Start a Claude Code session in any repo and it arrives as a new section of the island.</p>
   </div>
   <footer class="hud-bottom" id="hud-bottom">
     <section class="stream glass" aria-label="Event stream">
-      <div class="stream-head"><h2 class="eyebrow">Event stream</h2><span class="hint">Click a mirling for its story · click a project's name for its sessions</span></div>
+      <div class="stream-head"><h2 class="eyebrow">Event stream</h2><span class="hint">Click a session or a mirling for its story · click a project's name to find it</span></div>
       <ol id="events"></ol>
     </section>
     <div class="zoom glass" role="group" aria-label="Zoom">

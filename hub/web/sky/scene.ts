@@ -66,8 +66,11 @@ interface Mirling {
 
 export interface SkyOptions {
   art: Art;
-  /** Space the page's top and bottom bars cover, in CSS pixels, so "everything" fits between them. */
-  insets(): { top: number; bottom: number };
+  /**
+   * Space the page covers on each side, in CSS pixels: the top and bottom bars, the side panel on
+   * the left, and the story on the right while it's open. The camera works in the clear space between.
+   */
+  insets(): { top: number; bottom: number; left: number; right: number };
   /** A mirling was clicked. */
   onSelect(id: string): void;
   /** A section's name was clicked. */
@@ -145,19 +148,51 @@ export class SkyScene extends Phaser.Scene {
     this.#walkTo(col, pickOne(work.spots), () => this.#wander(col));
   }
 
-  /** Marks the mirling whose story is open, or none; `covered` CSS pixels on the right are behind the panel, so the camera slides it clear. */
-  select(id: string | null, covered = 0): void {
+  /** Marks the mirling whose story is open, or none. */
+  select(id: string | null): void {
     this.#selected = id;
-    if (!this.#ready) return;
-    const col = id ? this.#mirlings.get(id) : undefined;
-    this.#selectMark.setVisible(Boolean(col));
-    if (!col || !covered) return;
+    if (this.#ready) this.#selectMark.setVisible(Boolean(id && this.#mirlings.has(id)));
+  }
+
+  /** Slides the camera so a mirling hidden behind the page's panels comes into the clear. */
+  reveal(id: string): void {
+    const col = this.#ready ? this.#mirlings.get(id) : undefined;
+    if (!col) return;
     const cam = this.cameras.main;
     const d = DPR();
-    const screenX = (col.pos.x - cam.worldView.x) * cam.zoom / d;
-    const clear = window.innerWidth - covered;
-    if (screenX < clear - 40 && screenX > 40) return;
-    cam.pan(col.pos.x + (covered / 2) * d / cam.zoom, col.pos.y, 400, 'Sine.easeInOut', true);
+    const x = ((col.pos.x - cam.worldView.x) * cam.zoom) / d;
+    const y = ((col.pos.y - cam.worldView.y) * cam.zoom) / d;
+    const { top, bottom, left, right } = this.#options.insets();
+    if (x > left + 40 && x < window.innerWidth - right - 40 && y > top + 40 && y < window.innerHeight - bottom - 20) return;
+    const c = this.#centerFor(col.pos, cam.zoom);
+    cam.pan(c.x, c.y, 400, 'Sine.easeInOut', true);
+  }
+
+  /** Flies to a session's mirling, close enough to see it; false if it has none on the island. */
+  focusSession(id: string): boolean {
+    const col = this.#ready ? this.#mirlings.get(id) : undefined;
+    if (!col) return false;
+    const section = this.#levels.findIndex((l) => l.name === 'Section');
+    this.#setZoom(Math.max(this.#zoomIdx, section), col.pos);
+    return true;
+  }
+
+  /** Flies to a project's section. */
+  focusSection(name: string): void {
+    const i = this.#order.indexOf(name);
+    if (!this.#ready || i < 0 || !this.#sections[i]) return;
+    const { c0, r0 } = sectionOrigin(i);
+    const section = this.#levels.findIndex((l) => l.name === 'Section');
+    this.#setZoom(section >= 0 ? section : this.#zoomIdx, this.#tileXY(c0 + SEC / 2, r0 + SEC / 2));
+  }
+
+  /** Lays the camera out again after the page's panels change size, such as the side panel folding away. */
+  relayout(): void {
+    if (!this.#ready || !this.#sections.length) return;
+    const name = this.#levels[this.#zoomIdx]?.name;
+    this.#computeZoomLevels();
+    const idx = this.#levels.findIndex((l) => l.name === name);
+    this.#setZoom(idx >= 0 ? idx : Math.min(this.#zoomIdx, this.#levels.length - 1));
   }
 
   zoomBy(step: number): void {
@@ -656,15 +691,23 @@ export class SkyScene extends Phaser.Scene {
 
   #insets() {
     const d = DPR();
-    const { top, bottom } = this.#options.insets();
-    return { top: top * d, bottom: Math.min(bottom, window.innerHeight * 0.35) * d };
+    const { top, bottom, left } = this.#options.insets();
+    return { top: top * d, bottom: Math.min(bottom, window.innerHeight * 0.35) * d, left: left * d };
+  }
+
+  /** Where the camera centres so a world point shows in the middle of the clear space. */
+  #centerFor(point: { x: number; y: number }, zoom: number) {
+    const d = DPR();
+    const { top, bottom, left, right } = this.#options.insets();
+    const below = Math.min(bottom, window.innerHeight * 0.35);
+    return { x: point.x - (((left - right) / 2) * d) / zoom, y: point.y - (((top - below) / 2) * d) / zoom };
   }
 
   #computeZoomLevels(): void {
     const d = DPR();
     const inset = this.#insets();
     const { w, h } = this.#art.tile;
-    const availW = this.scale.width - 32 * d;
+    const availW = Math.max(120 * d, this.scale.width - inset.left - 32 * d);
     const availH = Math.max(120 * d, this.scale.height - inset.top - inset.bottom);
     const snap = (z: number) => (z >= 1 ? Math.floor(z) : z);
     // Everything always fits the screen; closer levels snap to whole steps so pixels stay even.
@@ -680,8 +723,7 @@ export class SkyScene extends Phaser.Scene {
   }
 
   #everythingCenter(zoom: number) {
-    const inset = this.#insets();
-    return { x: this.#fit.x + this.#fit.w / 2, y: this.#fit.y + this.#fit.h / 2 - (inset.top - inset.bottom) / (2 * zoom) };
+    return this.#centerFor({ x: this.#fit.x + this.#fit.w / 2, y: this.#fit.y + this.#fit.h / 2 }, zoom);
   }
 
   #applyFilter(zoom: number): void {
@@ -697,10 +739,10 @@ export class SkyScene extends Phaser.Scene {
     const cam = this.cameras.main;
     this.#zoomIdx = Phaser.Math.Clamp(i, 0, this.#levels.length - 1);
     const level = this.#levels[this.#zoomIdx] as { name: string; zoom: number };
-    let target = focus;
-    if (!target && level.name === 'Everything') target = this.#everythingCenter(level.zoom);
+    // `focus` is a world point to show; the camera centre is worked out from it.
     const selected = this.#selected ? this.#mirlings.get(this.#selected) : undefined;
-    if (!target && selected) target = selected.pos;
+    const point = focus ?? (level.name === 'Everything' ? undefined : selected?.pos);
+    const target = point ? this.#centerFor(point, level.zoom) : level.name === 'Everything' ? this.#everythingCenter(level.zoom) : undefined;
     this.#applyFilter(level.zoom);
     if (instant) {
       cam.setZoom(level.zoom);
