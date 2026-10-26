@@ -53,21 +53,18 @@ function savedSize(): number {
 
 let loading: Promise<void> | null = null;
 
-// xterm.js is only fetched the first time a terminal opens.
+// xterm.js is only fetched the first time a terminal opens. Its styles must be in place before it
+// measures anything, or the first fit comes out too big.
 function loadXterm(): Promise<void> {
   loading ??= new Promise((done, fail) => {
-    const css = document.createElement('link');
-    css.rel = 'stylesheet';
-    css.href = '/vendor/xterm.css';
-    document.head.append(css);
-    const script = (src: string) => new Promise<void>((ok, bad) => {
-      const el = document.createElement('script');
-      el.src = src;
+    const load = (el: HTMLLinkElement | HTMLScriptElement, src: string) => new Promise<void>((ok, bad) => {
       el.onload = () => ok();
       el.onerror = () => bad(new Error(`Couldn't load ${src}`));
       document.head.append(el);
     });
-    script('/vendor/xterm.js').then(() => script('/vendor/xterm-fit.js')).then(done, fail);
+    const css = Object.assign(document.createElement('link'), { rel: 'stylesheet', href: '/vendor/xterm.css' });
+    const script = (src: string) => load(Object.assign(document.createElement('script'), { src }), src);
+    Promise.all([load(css, css.href), script('/vendor/xterm.js').then(() => script('/vendor/xterm-fit.js'))]).then(() => done(), fail);
   });
   return loading;
 }
