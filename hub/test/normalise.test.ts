@@ -49,7 +49,7 @@ describe('normalise', () => {
     const event = normalise({ ...base, hook_event_name: 'StopFailure', error: 'rate_limit', error_details: '429 Too Many Requests', last_assistant_message: 'API Error: Rate limit reached' }, ctx);
     assert.equal(event?.status, 'failed');
     assert.equal(event?.detail?.reason, 'rate_limit');
-    assert.doesNotMatch(JSON.stringify(event), /API Error|429/);
+    assert.doesNotMatch(JSON.stringify({ ...event, id: undefined }), /API Error|429/); // a random id can contain 429
   });
 
   it('records where a session moved', () => {
