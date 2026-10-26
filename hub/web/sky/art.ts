@@ -5,6 +5,7 @@
 // frames to these names in `create` (scene.textures can add frames under any key), and give each
 // building-like picture an anchor. Then pass it to the scene instead of `drawnArt()`.
 
+import type { Palette } from './mirling.ts';
 import type { HouseStyle } from './world.ts';
 
 /** Label colours, one per section in turn. */
@@ -12,10 +13,8 @@ export type Accent = 'y' | 'l' | 'o' | 'c' | 'p' | 'g';
 export const ACCENTS: Accent[] = ['y', 'c', 'l', 'o', 'p', 'g'];
 export const ACCENT_COLOUR: Record<Accent, string> = { y: '#ffd34d', l: '#c8a6ff', o: '#ff8a3d', c: '#6ff3ff', p: '#ff9ec7', g: '#9be36b' };
 
-/** Creature colours: yellow, and grey when failed. */
-export type Palette = 'y' | 'g';
 export type Frame = 'a' | 'b';
-export type { HouseStyle };
+export type { HouseStyle, Palette };
 /** Ground tiles; a bridge's deck has its planks across the way it's crossed. */
 export type TileKind = 'grass0' | 'grass1' | 'grass2' | 'flowers' | 'path' | 'water' | 'deck-c' | 'deck-r';
 export type Decoration = 'shrub' | 'flowerbed' | 'lamp' | 'bench' | 'statue';

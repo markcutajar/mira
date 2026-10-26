@@ -1,0 +1,8 @@
+{
+  "name": "mira-app",
+  "productName": "Mira",
+  "description": "Mira in a window of its own, to pin to the taskbar.",
+  "private": true,
+  "type": "module",
+  "main": "main.ts"
+}

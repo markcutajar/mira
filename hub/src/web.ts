@@ -15,6 +15,7 @@ const FIXED: Record<string, { file: URL; type: string }> = {
   '/': { file: new URL('index.html', WEB), type: 'text/html; charset=utf-8' },
   '/sky': { file: new URL('index.html', WEB), type: 'text/html; charset=utf-8' }, // the address the sky had before
   '/markdown.js': { file: new URL('markdown.js', WEB), type: SCRIPT },
+  '/favicon.svg': { file: new URL('favicon.svg', WEB), type: 'image/svg+xml' }, // a mirling, drawn by `npm run icons`
   '/vendor/phaser.js': { file: new URL('../../node_modules/phaser/dist/phaser.min.js', import.meta.url), type: SCRIPT },
   '/vendor/xterm.js': { file: new URL('../../node_modules/@xterm/xterm/lib/xterm.js', import.meta.url), type: SCRIPT },
   '/vendor/xterm-fit.js': { file: new URL('../../node_modules/@xterm/addon-fit/lib/addon-fit.js', import.meta.url), type: SCRIPT },

@@ -269,6 +269,10 @@ describe('hub server', () => {
     const script = await fetch(`${base}/markdown.js`);
     assert.equal(script.status, 200);
     assert.match(script.headers.get('content-type') ?? '', /javascript/);
+    assert.match(page, /<link rel="icon" href="\/favicon\.svg"/);
+    const icon = await fetch(`${base}/favicon.svg`);
+    assert.deepEqual([icon.status, icon.headers.get('content-type')], [200, 'image/svg+xml']);
+    assert.match(await icon.text(), /^<svg [^>]*viewBox="0 0 18 18"/); // a mirling
     assert.equal((await fetch(`${base}/toString`)).status, 404);
   });
 

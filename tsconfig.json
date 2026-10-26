@@ -13,7 +13,7 @@
     "erasableSyntaxOnly": true,
     "skipLibCheck": true
   },
-  "include": ["contracts/**/*.ts", "hub/**/*.ts"],
+  "include": ["contracts/**/*.ts", "hub/**/*.ts", "app/**/*.ts"],
   // Browser code has its own config, with the DOM and Phaser instead of Node.
   "exclude": ["hub/web"]
 }

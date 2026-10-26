@@ -2,6 +2,7 @@
 // picture is registered under a name from art.ts, so an art pack can replace this module whole.
 
 import { MAX_LEVEL, names, WATERFALL_FRAMES, type Anchor, type Art, type Edge, type HouseStyle, type Palette, type Point } from './art.ts';
+import { MIRLING, PALETTES } from './mirling.ts';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -19,29 +20,11 @@ const C = {
   flowers: ['#f4f1e6', '#ffd34d', '#ff9ec7'],
 };
 
-const PAL: Record<Palette, Record<string, string>> = {
-  y: { o: '#5a3b12', y: '#ffd34d', h: '#fff1a8', s: '#e0a42a', d: '#c08420', e: '#1b1420', w: '#ffffff', m: '#7a3a12', k: '#ff9e7a', f: '#5a3b12' },
-  g: { o: '#34343c', y: '#8e8e98', h: '#b9b9c2', s: '#6e6e78', d: '#5a5a63', e: '#1b1420', w: '#d0d0d6', m: '#3a3a42', k: '#9a8a90', f: '#34343c' },
-};
+const PAL = PALETTES;
 
 // Hand-placed pixel maps; each letter is a colour from the palette passed with it.
 const MAPS = {
-  creature: {
-    a: [
-      '.....oo....oo.....', '....ohyo..oyyo....', '...ohyyooooyyso...', '..ohyyyyyyyyyyso..',
-      '.ohyyyyyyyyyyyyso.', '.ohyyweyyyyweyyso.', 'ohyyyeeyyyyeeyyyso', 'oyyyyeeyyyyeeyyyso',
-      'oyykkyyymmyyykkyso', 'oyyyyyyyyyyyyyyyso', 'oyyyyyyyyyyyyyysso', '.oyyyyyyyyyyyysso.',
-      '.osyyyyyyyyyyssdo.', '..ossyyyyyyyssdo..', '...oossssssssdo...', '.....oooooooo.....',
-      '....offo..offo....', '....oooo..oooo....',
-    ],
-    b: [
-      '.....oo....oo.....', '....ohyo..oyyo....', '...ohyyooooyyso...', '..ohyyyyyyyyyyso..',
-      '.ohyyyyyyyyyyyyso.', '.ohyyweyyyyweyyso.', 'ohyyyeeyyyyeeyyyso', 'oyyyyeeyyyyeeyyyso',
-      'oyykkyyymmyyykkyso', 'oyyyyyyyyyyyyyyyso', 'oyyyyyyyyyyyyyysso', '.oyyyyyyyyyyyysso.',
-      '.osyyyyyyyyyyssdo.', '..ossyyyyyyyssdo..', '...oossssssssdo...', '.....oooooooo.....',
-      '...offo....offo...', '...oooo....oooo...',
-    ],
-  },
+  creature: MIRLING,
   helper: {
     a: ['....oooo....', '..oohyyyoo..', '.ohyyyyyyso.', '.oyeyyyeyso.', 'oyyeyyyeyyso', 'oyyyymmyyyso', 'oyyyyyyyyyso', '.osyyyyysso.', '..oosssssoo.', '....oooo....', '...of..fo...', '...oo..oo...'],
     b: ['....oooo....', '..oohyyyoo..', '.ohyyyyyyso.', '.oyeyyyeyso.', 'oyyeyyyeyyso', 'oyyyymmyyyso', 'oyyyyyyyyyso', '.osyyyyysso.', '..oosssssoo.', '....oooo....', '..of....fo..', '..oo....oo..'],
