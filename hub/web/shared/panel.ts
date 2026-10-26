@@ -64,7 +64,7 @@ export function createPanel(options: PanelOptions): Panel {
     <div class="totals" data-totals></div>
     <div class="turns" data-turns></div>
     <div class="term-view" data-term hidden>
-      <div class="term-bar"><span class="term-state" data-term-state></span><button type="button" class="go small" data-term-start hidden>Resume here</button><button type="button" class="stop small" data-term-stop hidden>Stop</button></div>
+      <div class="term-bar"><span class="term-state" data-term-state></span><button type="button" class="ghost small" data-term-zoom="-1" title="Smaller text" aria-label="Smaller text">A−</button><button type="button" class="ghost small" data-term-zoom="1" title="Larger text" aria-label="Larger text">A+</button><button type="button" class="go small" data-term-start hidden>Resume here</button><button type="button" class="stop small" data-term-stop hidden>Stop</button></div>
       <div class="term-host" data-term-host></div>
     </div>`;
   document.body.append(root);
@@ -370,6 +370,8 @@ export function createPanel(options: PanelOptions): Panel {
     if (target.closest('[data-editor]')) return continueInEditor();
     if (target.closest('[data-terminal]')) return void showTerminal(state.view !== 'terminal');
     if (target.closest('[data-term-start]')) return state.term?.view?.start();
+    const zoom = (target.closest('[data-term-zoom]') as HTMLElement | null)?.dataset.termZoom;
+    if (zoom) return state.term?.view?.zoom(Number(zoom));
     if (target.closest('[data-term-stop]')) {
       const title = state.term?.state?.title ?? 'the program';
       return void confirmStop(title).then((yes) => { if (yes) state.term?.view?.stop(); });

@@ -13,12 +13,43 @@ export interface TerminalState {
 
 export interface TerminalView {
   start(): void;
+  /** Makes the text smaller or larger by one step; the size is remembered in this browser. */
+  zoom(step: number): void;
   stop(): void;
   focus(): void;
   dispose(): void;
 }
 
 type FromHub = { type: 'state'; running: boolean; title?: string; exitCode?: number | null } | { type: 'output'; data: string };
+
+// The look of my Windows Terminal: Cascadia Code, semi-light, 8 point, with each cell 1.2 times
+// the font size high and 0.6 times wide. Sizes are in points, as there; the page needs pixels.
+const LOOK = { family: '"Cascadia Code", "Cascadia Mono", Consolas, monospace', weight: 350, cellHeight: 1.2, cellWidth: 0.6 };
+const SIZE_KEY = 'mira.terminalPoints';
+const SIZES = { min: 6, max: 18, start: 8 };
+
+// Windows Terminal rounds each cell to whole pixels. xterm.js counts line height in multiples of
+// the font's own height and letter spacing in pixels, so measure its plain cells and stretch them.
+function applyLook(term: XTerm, host: HTMLElement, points: number): void {
+  const px = (points * 4) / 3;
+  term.options = { fontSize: px, lineHeight: 1, letterSpacing: 0 };
+  const screen = host.querySelector('.xterm-screen')?.getBoundingClientRect();
+  if (!screen?.width || !term.cols || !term.rows) return; // not on screen yet; plain cells will do
+  const dpr = devicePixelRatio || 1;
+  const width = (screen.width / term.cols) * dpr;
+  const height = (screen.height / term.rows) * dpr;
+  const wantWidth = Math.round(LOOK.cellWidth * px * dpr);
+  const wantHeight = Math.round(LOOK.cellHeight * px * dpr);
+  term.options = { lineHeight: Math.max(1, (wantHeight + 0.01) / height), letterSpacing: wantWidth - width };
+}
+
+function savedSize(): number {
+  try {
+    const n = Number(localStorage.getItem(SIZE_KEY));
+    if (n >= SIZES.min && n <= SIZES.max) return n;
+  } catch { /* storage unavailable */ }
+  return SIZES.start;
+}
 
 let loading: Promise<void> | null = null;
 
@@ -44,16 +75,18 @@ function loadXterm(): Promise<void> {
 export async function openTerminal(host: HTMLElement, sessionId: string, onState: (state: TerminalState) => void): Promise<TerminalView> {
   await loadXterm();
   const globals = globalThis as unknown as { Terminal: typeof XTerm; FitAddon: { FitAddon: typeof Fit } };
+  let points = savedSize();
   const term = new globals.Terminal({
     cursorBlink: true,
-    fontFamily: '"IBM Plex Mono", "Cascadia Mono", Consolas, monospace',
-    fontSize: 13,
+    fontFamily: LOOK.family,
+    fontWeight: LOOK.weight,
     scrollback: 5000,
     theme: { background: '#0b0d1a', foreground: '#ece8d9', cursor: '#ffd34d', cursorAccent: '#0b0d1a', selectionBackground: 'rgba(255, 211, 77, 0.3)' },
   });
   const fit = new globals.FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(host);
+  applyLook(term, host, points);
   fit.fit();
 
   const state: TerminalState = { connected: false, running: false };
@@ -92,6 +125,13 @@ export async function openTerminal(host: HTMLElement, sessionId: string, onState
       term.focus();
     },
     stop: () => send({ type: 'stop' }),
+    zoom: (step) => {
+      points = Math.max(SIZES.min, Math.min(SIZES.max, points + step));
+      applyLook(term, host, points);
+      try { localStorage.setItem(SIZE_KEY, String(points)); } catch { /* not remembered */ }
+      fit.fit();
+      send({ type: 'resize', cols: term.cols, rows: term.rows });
+    },
     focus: () => term.focus(),
     dispose: () => {
       resized.disconnect();
