@@ -6,7 +6,8 @@ import * as z from 'zod';
 
 export const CONTRACT_VERSION = 1;
 
-export const Source = z.enum(['claude-code']);
+/** The agent an event came from (decision 22): `claude-code` today, any agent tomorrow. */
+export const Source = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, 'lower-case letters, digits and dashes');
 export type Source = z.infer<typeof Source>;
 
 export const Status = z.enum(['working', 'needs-me', 'my-turn', 'failed', 'ended']);
@@ -61,6 +62,8 @@ export const Detail = z.strictObject({
   durationMs: count.optional(),
   interrupted: z.boolean().optional(),
   permissionMode: label.optional(),
+  /** The model that did the work, e.g. `claude-opus-5-5`. */
+  model: label.optional(),
   cwd: path.optional(),
   previousCwd: path.optional(),
 });

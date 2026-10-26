@@ -107,11 +107,48 @@
   #events .type { color: var(--thronglet); }
   #events .what { color: var(--dim); }
 
+  .title-btn { all: unset; cursor: pointer; overflow-wrap: anywhere; }
+  .title-btn:hover, .session.open .title-btn { color: var(--thronglet); }
+  .title-btn:focus-visible, .turn-head:focus-visible { outline: 2px solid var(--thronglet); outline-offset: 2px; }
+
+  /* The story panel: one session, turn by turn, read from its transcript when opened. */
+  .panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 3; width: min(760px, 100%); display: flex; flex-direction: column; background: var(--hull); border-left: 2px solid var(--hull-edge); box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45); }
+  .panel-head { display: flex; align-items: flex-start; gap: 12px; padding: 14px 18px 10px; border-bottom: 1px solid var(--hull-edge); }
+  .panel-head > div { flex: 1; min-width: 0; }
+  .panel-head h2 { margin: 4px 0 2px; font: 600 18px var(--font-display); overflow-wrap: anywhere; }
+  .totals { display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 10px 18px; border-bottom: 1px solid var(--hull-edge); font: 11px var(--font-data); color: var(--dim); }
+  .totals b { display: block; font: 500 16px var(--font-data); color: var(--ink); font-variant-numeric: tabular-nums; }
+  .totals .cost b { color: var(--thronglet); }
+  .totals .hint { flex-basis: 100%; }
+  .turns { flex: 1; overflow: auto; padding: 4px 18px 28px; }
+  .earlier { margin: 10px 0; }
+  .turn { border-top: 1px solid var(--hull-edge); }
+  .turn-head { all: unset; box-sizing: border-box; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: baseline; width: 100%; padding: 9px 0; cursor: pointer; }
+  .turn-head .t { font: 12px var(--font-data); color: var(--faint); white-space: nowrap; }
+  .turn-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .turn[data-from="agent"] .turn-prompt { color: var(--dim); font-style: italic; }
+  .turn-meta { font: 12px var(--font-data); color: var(--dim); white-space: nowrap; }
+  .state { margin-right: 8px; padding: 0 6px; background: var(--c); color: var(--void); font-family: var(--font-display); }
+  .state[data-state="running"] { --c: var(--working); }
+  .state[data-state="interrupted"], .state[data-state="quiet"] { --c: var(--dim); }
+  .state[data-state="failed"] { --c: var(--failed); }
+  .turn-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 0 0 14px 4px; padding-left: 12px; border-left: 2px solid var(--hull-edge); }
+  .you, .reply { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.55; }
+  .you { padding: 8px 10px; border-left: 3px solid var(--thronglet); background: var(--void); }
+  .tool { display: flex; gap: 8px; align-items: baseline; font: 12px var(--font-data); color: var(--dim); }
+  .tool-name { flex: none; color: var(--working); }
+  .tool.failed .tool-name, .failed-tag { color: var(--failed); }
+  .tool-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .helper-card { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-left: 16px; padding: 6px 10px; border: 1px solid var(--hull-edge); font: 12px var(--font-data); color: var(--dim); }
+  .note { margin: 0; font: 11px var(--font-data); color: var(--faint); letter-spacing: 0.06em; text-transform: uppercase; }
+  .panel-msg { padding: 18px 0; color: var(--dim); }
+
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: min(640px, calc(100% - 32px)); padding: 10px 14px; background: var(--hull); border: 2px solid var(--hull-edge); font-size: 13px; overflow-wrap: anywhere; user-select: all; }
 
   @media (max-width: 960px) {
     .layout { grid-template-columns: minmax(0, 1fr); }
     .stream { position: static; max-height: none; }
+    .panel-head, .totals, .turns { padding-left: 14px; padding-right: 14px; }
   }
 </style>
 </head>
@@ -138,6 +175,18 @@
     <ol id="events"></ol>
   </aside>
 </main>
+<aside class="panel" id="panel" aria-labelledby="panel-title" hidden>
+  <header class="panel-head">
+    <div>
+      <button type="button" class="ghost small" id="panel-back" hidden>← Back to session</button>
+      <h2 id="panel-title"></h2>
+      <div class="meta" id="panel-sub"></div>
+    </div>
+    <button type="button" class="ghost small" id="panel-close" aria-label="Close the story">Close</button>
+  </header>
+  <div class="totals" id="panel-totals"></div>
+  <div class="turns" id="panel-turns"></div>
+</aside>
 <p class="toast" id="toast" role="status" hidden></p>
 
 <script>
@@ -146,7 +195,14 @@
   const $ = (id) => document.getElementById(id);
   const LABEL = { 'needs-me': 'Needs you', failed: 'Failed', 'my-turn': 'Your turn', working: 'Working', ended: 'Ended' };
   const ORDER = ['needs-me', 'failed', 'my-turn', 'working', 'ended', null];
+  const STATE = { running: 'Running', quiet: 'Quiet', interrupted: 'Interrupted', failed: 'Failed' };
+  const TURNS_STEP = 30;
+  // A turn or subagent that stopped writing this long ago was cut off, not still at work.
+  const QUIET_MS = 30 * 60 * 1000;
+  const quiet = (iso) => Boolean(iso) && Date.now() - Date.parse(iso) > QUIET_MS;
   const state = { sessions: [], pending: [], events: [], viewer: null, waitSeconds: 60, connected: false, busy: new Set() };
+  // The open story: which session (and subagent), how many turns, and which turns are unfolded.
+  const panel = { id: null, helper: null, helperName: '', turns: TURNS_STEP, story: null, error: '', open: new Set(), auto: null, timer: 0 };
   let lastSessionsHTML = '';
   let toastTimer = 0;
 
@@ -161,6 +217,20 @@
   const rank = (s) => ORDER.indexOf(s?.status ?? null);
   const clock = (iso) => new Date(iso).toTimeString().slice(0, 8);
   const watching = () => hold && document.visibilityState === 'visible';
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  function tokens(n) {
+    if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+    return n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n);
+  }
+  function cost(usd) {
+    if (usd < 0.005) return '<$0.01';
+    return usd >= 1000 ? `$${Math.round(usd).toLocaleString()}` : `$${usd.toFixed(2)}`;
+  }
+  function when(iso) {
+    const d = new Date(iso);
+    const time = d.toTimeString().slice(0, 5);
+    return d.toDateString() === new Date().toDateString() ? time : `${d.getDate()} ${d.toLocaleString('en', { month: 'short' })} ${time}`;
+  }
   function ago(iso) {
     const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
     if (s < 10) return 'just now';
@@ -191,13 +261,14 @@
       presence();
       renderConnection();
     });
-    stream.addEventListener('sessions', (e) => { state.sessions = JSON.parse(e.data); renderSessions(); renderCounts(); });
+    stream.addEventListener('sessions', (e) => { state.sessions = JSON.parse(e.data); renderSessions(); renderCounts(); if (panel.id) renderPanelHead(); });
     stream.addEventListener('pending', (e) => { state.pending = JSON.parse(e.data); renderPrompts(); renderCounts(); });
     stream.addEventListener('event', (e) => {
       const event = JSON.parse(e.data);
       if (!state.events.some((x) => x.id === event.id)) state.events.unshift(event);
       state.events.length = Math.min(state.events.length, 80);
       renderEvents();
+      if (panel.id && (event.actor.id === panel.id || event.actor.parent === panel.id)) refreshStorySoon();
     });
     // EventSource reconnects by itself; the hub sends a fresh hello when it does.
     stream.onerror = () => { Object.assign(state, { connected: false, viewer: null }); renderConnection(); };
@@ -267,8 +338,10 @@
   function sectionHTML({ system, list }) {
     const needs = list.filter((s) => s.status === 'needs-me').length;
     const active = list.filter((s) => s.status && s.status !== 'ended').length;
+    const spent = list.reduce((sum, s) => sum + (s.usage?.costUsd ?? 0), 0);
+    const spend = spent ? ` · <span title="Estimated cost of these sessions' finished turns">${cost(spent)}</span>` : '';
     return `<section class="project box">
-      <header><h2>${esc(system)}</h2><span class="summary">${active} active${needs ? ` · <span class="needs">${needs} need${needs === 1 ? 's' : ''} you</span>` : ''}</span></header>
+      <header><h2>${esc(system)}</h2><span class="summary">${active} active${spend}${needs ? ` · <span class="needs">${needs} need${needs === 1 ? 's' : ''} you</span>` : ''}</span></header>
       ${list.map(sessionHTML).join('')}
     </section>`;
   }
@@ -282,12 +355,13 @@
       s.cwd ? `<span title="${esc(s.cwd)}">${esc(folder(s.cwd))}</span>` : '',
       s.lastTool ? `last ${esc(s.lastTool)}` : '',
       `<span data-since="${esc(s.lastAt)}"></span>`,
+      s.usage ? `<span title="Estimated cost of finished turns · ${esc(tokens(s.usage.tokens))} tokens">${esc(cost(s.usage.costUsd))}</span>` : '',
       s.seenIn === 'transcript' ? '<span class="faint">found at startup</span>' : '',
     ].filter(Boolean).join(' · ');
-    return `<div class="session" data-status="${esc(status)}">
+    return `<div class="session${panel.id === s.id ? ' open' : ''}" data-status="${esc(status)}">
       <span class="pill" data-status="${esc(status)}">${LABEL[s.status] ?? 'Unknown'}</span>
       <div>
-        <div class="title">${esc(label(s))}${tree}${mode}</div>
+        <div class="title"><button type="button" class="title-btn" data-open="${esc(s.id)}" title="Open this session's story">${esc(label(s))}</button>${tree}${mode}</div>
         <div class="meta">${meta}</div>
         ${helpers.length ? `<div class="helpers">${helpers.map((a) => `<span class="helper">${esc(a.name || 'subagent')}</span>`).join('')}</div>` : ''}
       </div>
@@ -312,6 +386,125 @@
       const bar = el.closest('.prompt')?.querySelector('.bar i');
       if (bar) bar.style.width = `${(left / state.waitSeconds) * 100}%`;
     }
+  }
+
+  // -- the story panel --
+  function openSession(id) {
+    if (panel.id !== id) Object.assign(panel, { helper: null, helperName: '', turns: TURNS_STEP, story: null, error: '', open: new Set(), auto: null });
+    panel.id = id;
+    $('panel').hidden = false;
+    try { history.replaceState(null, '', `#session=${encodeURIComponent(id)}`); } catch { /* not remembered */ }
+    renderSessions();
+    renderPanelHead();
+    loadStory('first');
+  }
+
+  function openHelper(id, name) {
+    Object.assign(panel, { helper: id, helperName: name, turns: TURNS_STEP, story: null, error: '', open: new Set(), auto: null });
+    renderPanelHead();
+    loadStory('first');
+  }
+
+  function closePanel() {
+    clearTimeout(panel.timer);
+    Object.assign(panel, { id: null, helper: null, story: null, timer: 0 });
+    $('panel').hidden = true;
+    try { history.replaceState(null, '', location.pathname); } catch { /* fine */ }
+    renderSessions();
+  }
+
+  async function loadStory(mode) {
+    const id = panel.id;
+    const helper = panel.helper;
+    if (!id) return;
+    const params = new URLSearchParams({ turns: String(panel.turns) });
+    if (helper) params.set('helper', helper);
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/story?${params}`);
+      if (panel.id !== id || panel.helper !== helper) return;
+      if (res.ok) Object.assign(panel, { story: await res.json(), error: '' });
+      else Object.assign(panel, { story: null, error: res.status === 404 ? "This session's transcript can't be read here." : `The hub couldn't read it (${res.status}).` });
+    } catch {
+      if (panel.id === id) panel.error = "The hub isn't reachable.";
+    }
+    renderPanelBody(mode);
+  }
+
+  // At most one refresh every couple of seconds while the session is busy.
+  function refreshStorySoon() {
+    if (panel.timer) return;
+    panel.timer = setTimeout(() => { panel.timer = 0; loadStory('live'); }, 2000);
+  }
+
+  function renderPanelHead() {
+    const session = state.sessions.find((s) => s.id === panel.id);
+    const name = session ? label(session) : short(panel.id);
+    $('panel-title').textContent = panel.helper ? panel.helperName || 'Subagent' : name;
+    $('panel-sub').textContent = panel.helper ? `Subagent of ${name}` : session ? [...new Set([session.system, folder(session.cwd)])].concat(LABEL[session.status] ?? []).filter(Boolean).join(' · ') : '';
+    $('panel-back').hidden = !panel.helper;
+  }
+
+  function renderPanelBody(mode) {
+    const box = $('panel-turns');
+    const fromBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
+    const top = box.scrollTop;
+    const story = panel.story;
+    if (!story) {
+      $('panel-totals').innerHTML = '';
+      box.innerHTML = `<p class="panel-msg">${esc(panel.error || 'Reading the transcript…')}</p>`;
+      return;
+    }
+    const last = story.turns.at(-1);
+    if (last && panel.auto !== last.id) {
+      panel.open.add(last.id); // the latest turn starts unfolded
+      panel.auto = last.id;
+    }
+    $('panel-totals').innerHTML = totalsHTML(story);
+    const earlier = story.earlier ? `<button type="button" class="ghost small earlier" data-earlier>Show ${plural(Math.min(TURNS_STEP, story.earlier), 'earlier turn')} (${story.earlier} in all)</button>` : '';
+    box.innerHTML = earlier + (story.turns.map(turnHTML).join('') || '<p class="panel-msg">Nothing has happened in this session yet.</p>');
+    if (mode === 'first' || (mode === 'live' && fromBottom < 48)) box.scrollTop = box.scrollHeight;
+    else if (mode === 'earlier') box.scrollTop = box.scrollHeight - box.clientHeight - fromBottom;
+    else box.scrollTop = top;
+  }
+
+  function totalsHTML(story) {
+    const u = story.usage;
+    const items = [
+      ['cost', 'Estimated cost', cost(u.costUsd)],
+      ['', 'Output', tokens(u.output)],
+      ['', 'Input', tokens(u.input)],
+      ['', 'Cache reads', tokens(u.cacheRead)],
+      ['', 'Cache writes', tokens(u.cacheWrite)],
+      story.contextTokens != null ? ['', 'In context now', tokens(story.contextTokens)] : null,
+      story.model ? ['', 'Model', story.model] : null,
+    ].filter(Boolean);
+    const unpriced = u.unpriced?.length ? `<p class="hint">The cost leaves out ${esc(u.unpriced.join(', '))}, which ${u.unpriced.length === 1 ? 'has' : 'have'} no price set.</p>` : '';
+    return items.map(([cls, name, value]) => `<div class="${cls}">${esc(name)}<b>${esc(value)}</b></div>`).join('') + unpriced;
+  }
+
+  function turnHTML(t) {
+    const open = panel.open.has(t.id);
+    const tools = t.steps.filter((s) => s.kind === 'tool').length;
+    const meta = [tools ? plural(tools, 'tool') : '', t.usage.costUsd ? cost(t.usage.costUsd) : ''].filter(Boolean).join(' · ');
+    const shown = t.state === 'running' && quiet(t.endedAt) ? 'quiet' : t.state;
+    const badge = STATE[shown] ? `<span class="state" data-state="${esc(shown)}" title="${shown === 'quiet' ? `Nothing since ${esc(when(t.endedAt))}` : ''}">${STATE[shown]}</span>` : '';
+    const first = (t.prompt || 'Carried on by itself').split('\n').find((line) => line.trim()) || '…';
+    return `<article class="turn" data-from="${esc(t.from)}">
+      <button type="button" class="turn-head" data-turn="${esc(t.id)}" aria-expanded="${open}">
+        <span class="t">${esc(when(t.at))}</span><span class="turn-prompt">${esc(first)}</span><span class="turn-meta">${badge}${esc(meta)}</span>
+      </button>
+      ${open ? `<div class="turn-body">${t.prompt ? `<p class="you">${esc(t.prompt)}</p>` : ''}${t.steps.map(stepHTML).join('')}</div>` : ''}
+    </article>`;
+  }
+
+  function stepHTML(s) {
+    if (s.kind === 'text') return `<p class="reply">${esc(s.text)}</p>`;
+    if (s.kind === 'note') return `<p class="note">${esc(s.text)}</p>`;
+    const line = `<div class="tool${s.failed ? ' failed' : ''}"><span class="tool-name">${esc(s.name)}</span>${s.summary ? `<span class="tool-sum" title="${esc(s.summary)}">${esc(s.summary)}</span>` : ''}${s.failed ? '<span class="failed-tag">failed</span>' : ''}</div>`;
+    const h = s.helper;
+    if (!h) return line;
+    return `${line}<div class="helper-card"><span class="helper">${esc(h.name || 'subagent')}</span><span>${plural(h.tools, 'tool')}</span><span>${esc(cost(h.usage.costUsd))}</span><span>${h.state === 'done' ? 'done' : quiet(h.lastAt) ? `quiet since ${esc(when(h.lastAt))}` : 'working'}</span>
+      <button type="button" class="ghost small" data-helper="${esc(h.id)}" data-helper-name="${esc([h.name, h.description].filter(Boolean).join(': '))}">Open</button></div>`;
   }
 
   // -- actions --
@@ -346,7 +539,30 @@
     const answerButton = e.target.closest('[data-answer]');
     if (answerButton) return void answer(answerButton.closest('[data-prompt]').dataset.prompt, answerButton.dataset.answer);
     const resumeButton = e.target.closest('[data-resume]');
-    if (resumeButton) void copyResume(resumeButton);
+    if (resumeButton) return void copyResume(resumeButton);
+    const openButton = e.target.closest('[data-open]');
+    if (openButton) return openSession(openButton.dataset.open);
+    const turnButton = e.target.closest('[data-turn]');
+    if (turnButton) {
+      const id = turnButton.dataset.turn;
+      if (!panel.open.delete(id)) panel.open.add(id);
+      return renderPanelBody('keep');
+    }
+    if (e.target.closest('[data-earlier]')) {
+      panel.turns += TURNS_STEP;
+      return void loadStory('earlier');
+    }
+    const helperButton = e.target.closest('[data-helper]');
+    if (helperButton) return openHelper(helperButton.dataset.helper, helperButton.dataset.helperName);
+  });
+  $('panel-close').addEventListener('click', closePanel);
+  $('panel-back').addEventListener('click', () => {
+    Object.assign(panel, { helper: null, helperName: '', turns: TURNS_STEP, story: null, open: new Set(), auto: null });
+    renderPanelHead();
+    loadStory('first');
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && panel.id) closePanel();
   });
   $('hold').addEventListener('change', (e) => {
     hold = e.target.checked;
@@ -360,6 +576,8 @@
   connect();
   loadHistory();
   setInterval(tick, 1000);
+  const linked = location.hash.match(/^#session=([\w-]+)$/);
+  if (linked) openSession(linked[1]);
 })();
 </script>
 </body>

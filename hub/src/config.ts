@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import * as z from 'zod';
+import { Price } from './pricing.ts';
 
 export const miraHome = process.env.MIRA_HOME ?? join(homedir(), '.mira');
 export const claudeProjects = process.env.CLAUDE_PROJECTS_DIR ?? join(homedir(), '.claude', 'projects');
@@ -16,6 +17,8 @@ const Config = z.object({
   permissionWaitSeconds: z.number().int().min(1).max(600).default(60),
   /** On startup, sessions whose transcripts changed this recently count as still running. */
   activeHours: z.number().min(0).max(72).default(2),
+  /** Override or add model prices, in US dollars per million tokens, for cost estimates. */
+  prices: z.record(z.string(), Price).default({}),
 });
 export type Config = z.infer<typeof Config>;
 

@@ -10,6 +10,7 @@ export class Store {
   #insert: StatementSync;
   #recent: StatementSync;
   #since: StatementSync;
+  #sinceOfType: StatementSync;
 
   constructor(file: string) {
     if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
@@ -33,6 +34,7 @@ export class Store {
     this.#insert = this.#db.prepare('INSERT OR IGNORE INTO events (id, at, source, system, actor_id, type, status, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     this.#recent = this.#db.prepare('SELECT body FROM events ORDER BY seq DESC LIMIT ?');
     this.#since = this.#db.prepare('SELECT body FROM events WHERE at >= ? ORDER BY at, seq');
+    this.#sinceOfType = this.#db.prepare('SELECT body FROM events WHERE at >= ? AND type = ? ORDER BY at, seq');
   }
 
   /** Stores an event; returns false if one with the same id is already stored. */
@@ -46,9 +48,10 @@ export class Store {
     return this.#recent.all(limit).map((row) => JSON.parse(String(row.body)) as MiraEvent);
   }
 
-  /** Events at or after `at`, oldest first. */
-  since(at: string): MiraEvent[] {
-    return this.#since.all(at).map((row) => JSON.parse(String(row.body)) as MiraEvent);
+  /** Events at or after `at`, oldest first, optionally of one type. */
+  since(at: string, type?: MiraEvent['type']): MiraEvent[] {
+    const rows = type ? this.#sinceOfType.all(at, type) : this.#since.all(at);
+    return rows.map((row) => JSON.parse(String(row.body)) as MiraEvent);
   }
 
   close(): void {

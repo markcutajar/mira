@@ -22,6 +22,12 @@ describe('MiraEvent', () => {
     assert.equal(MiraEvent.safeParse(sessionEvent).success, true);
   });
 
+  it("accepts any agent's source ID, but only in its short form", () => {
+    assert.equal(MiraEvent.safeParse({ ...sessionEvent, source: 'codex-cli' }).success, true);
+    assert.equal(MiraEvent.safeParse({ ...sessionEvent, source: 'Codex CLI' }).success, false);
+    assert.equal(MiraEvent.safeParse({ ...sessionEvent, source: 'x'.repeat(41) }).success, false);
+  });
+
   it('rejects content at the top level', () => {
     assert.equal(MiraEvent.safeParse({ ...sessionEvent, prompt: 'refactor the auth module' }).success, false);
   });

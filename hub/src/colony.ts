@@ -1,4 +1,5 @@
-// The live picture: every session and subagent with the status it shows now, worked out from events.
+// The live picture: every session and subagent with the status it shows now, worked out from events,
+// plus the tokens and estimated cost each session has reported so far.
 // Watch-only hooks arrive as background commands (decision 20), so events can land slightly out of
 // order. Three rules keep the status honest:
 //  1. An event older than the status already shown doesn't replace it.
@@ -6,7 +7,7 @@
 //  3. A tool waiting for permission is still waiting, whatever its start event says.
 
 import type { MiraEvent, Status } from '../../contracts/src/index.ts';
-import type { TranscriptSession } from './claude-code/transcripts.ts';
+import type { FoundSession } from './sources.ts';
 
 export interface SubagentView {
   id: string;
@@ -15,8 +16,14 @@ export interface SubagentView {
   lastAt: string;
 }
 
+export interface SessionUsage {
+  tokens: number;
+  costUsd: number;
+}
+
 export interface SessionView {
   id: string;
+  source: string;
   system: string;
   status: Status | null;
   lastAt: string;
@@ -27,6 +34,8 @@ export interface SessionView {
   /** `transcript` until the first live event arrives for a session found at startup. */
   seenIn: 'events' | 'transcript';
   subagents: SubagentView[];
+  /** Totals from usage events: every turn that has finished, the session's and its subagents'. */
+  usage?: SessionUsage;
 }
 
 interface Session extends Omit<SessionView, 'subagents'> {
@@ -44,6 +53,8 @@ export class Colony {
   apply(event: MiraEvent): void {
     const sessionId = event.actor.kind === 'subagent' ? event.actor.parent : event.actor.id;
     if (!sessionId) return;
+    // Token counts add to a session the colony already knows; they never bring an old one back.
+    if (event.type === 'usage.reported') return this.#addUsage(sessionId, event);
     const s = this.#session(sessionId, event);
     if (event.at >= s.lastAt) {
       s.lastAt = event.at;
@@ -77,12 +88,12 @@ export class Colony {
     s.statusAt = event.at;
   }
 
-  /** Adds sessions found in transcripts at startup, unless events already know more about them. */
-  seed(found: Array<TranscriptSession & { system: string }>): void {
+  /** Adds sessions a source found at startup, unless events already know more about them. */
+  seed(source: string, found: FoundSession[]): void {
     for (const f of found) {
       const known = this.#sessions.get(f.sessionId);
       if (known && known.lastAt >= f.lastAt) continue;
-      const s = known ?? this.#blank(f.sessionId, f.system, f.lastAt);
+      const s = known ?? this.#blank(f.sessionId, source, f.system, f.lastAt);
       Object.assign(s, { system: f.system, cwd: f.cwd, transcript: f.transcript, lastAt: f.lastAt, status: f.status, statusAt: f.lastAt, seenIn: 'transcript' });
       this.#sessions.set(s.id, s);
     }
@@ -93,19 +104,39 @@ export class Colony {
     return [...this.#sessions.values()]
       .filter((s) => s.status !== 'ended' || now - Date.parse(s.lastAt) < ENDED_VISIBLE_MS)
       .sort((a, b) => a.system.localeCompare(b.system) || b.lastAt.localeCompare(a.lastAt))
-      .map(({ statusAt, endedTurns, subagents, ...view }) => ({ ...view, subagents: [...subagents.values()] }));
+      .map((s) => this.#view(s));
+  }
+
+  /** One session as it stands, including one that ended long ago. */
+  get(id: string): SessionView | undefined {
+    const s = this.#sessions.get(id);
+    return s ? this.#view(s) : undefined;
+  }
+
+  #addUsage(sessionId: string, event: MiraEvent): void {
+    const s = this.#sessions.get(sessionId);
+    const u = event.usage;
+    if (!s || !u) return;
+    const usage = s.usage ?? { tokens: 0, costUsd: 0 };
+    usage.tokens += (u.inputTokens ?? 0) + (u.outputTokens ?? 0) + (u.cacheReadTokens ?? 0) + (u.cacheWriteTokens ?? 0);
+    usage.costUsd = Math.round((usage.costUsd + (u.costUsd ?? 0)) * 1e6) / 1e6;
+    s.usage = usage;
+  }
+
+  #view({ statusAt, endedTurns, subagents, usage, ...view }: Session): SessionView {
+    return { ...view, subagents: [...subagents.values()], ...(usage ? { usage: { ...usage } } : {}) };
   }
 
   #session(id: string, event: MiraEvent): Session {
     let s = this.#sessions.get(id);
     if (!s) {
-      s = this.#blank(id, event.system, event.at);
+      s = this.#blank(id, event.source, event.system, event.at);
       this.#sessions.set(id, s);
     }
     return s;
   }
 
-  #blank(id: string, system: string, at: string): Session {
-    return { id, system, status: null, statusAt: '', lastAt: at, seenIn: 'events', endedTurns: [], subagents: new Map() };
+  #blank(id: string, source: string, system: string, at: string): Session {
+    return { id, source, system, status: null, statusAt: '', lastAt: at, seenIn: 'events', endedTurns: [], subagents: new Map() };
   }
 }

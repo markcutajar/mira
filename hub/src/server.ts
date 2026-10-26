@@ -1,27 +1,29 @@
 // The hub's HTTP face. It listens on 127.0.0.1 only and refuses requests sent by a web page on
 // another site (decision: no access token while local), so no page in the browser can inject
-// events or answer a prompt. Live updates go to the browser as Server-Sent Events.
+// events, answer a prompt or read a session's story. Live updates go to the browser as
+// Server-Sent Events. Each source plugs in through its adapter (decision 22).
 
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { CONTRACT_VERSION, MiraEvent } from '../../contracts/src/index.ts';
-import { normalise, type HookPayload } from './claude-code/normalise.ts';
 import type { Colony } from './colony.ts';
 import { Permissions, summarise, type Decision } from './permissions.ts';
+import type { SourceAdapter } from './sources.ts';
 import type { Store } from './store.ts';
 import type { Place } from './systems.ts';
+
+type Payload = Record<string, unknown>;
 
 export interface HubOptions {
   store: Store;
   colony: Colony;
+  sources: SourceAdapter[];
   placeFor: (cwd: string | undefined) => Place;
   permissionWaitMs: number;
-  recordShape?: (source: string, payload: HookPayload, bytes: number) => void;
+  recordShape?: (source: string, payload: Payload, bytes: number) => void;
   onEvent?: (event: MiraEvent) => void;
-  /** A display title for a session, read from its transcript on demand. */
-  titleFor?: (transcript: string | undefined) => string | undefined;
 }
 
 interface Viewer {
@@ -30,6 +32,7 @@ interface Viewer {
 }
 
 const MAX_BODY = 16 * 1024 * 1024;
+const STORY_TURNS = 30;
 const CLOCK_SKEW_MS = 10 * 60 * 1000;
 const HEARTBEAT_MS = 25 * 1000;
 const BOARD = new URL('../web/board.html', import.meta.url);
@@ -37,6 +40,9 @@ const BOARD_POLICY = "default-src 'self'; script-src 'self' 'unsafe-inline'; sty
 
 export function createHub(options: HubOptions) {
   const { store, colony } = options;
+  const sources = new Map(options.sources.map((s) => [s.id, s]));
+  // Permission prompts are Claude Code's own hook, answered in its own format.
+  const claude = sources.get('claude-code');
   const viewers = new Map<string, Viewer>();
   const permissions = new Permissions({
     waitMs: options.permissionWaitMs,
@@ -49,7 +55,7 @@ export function createHub(options: HubOptions) {
     for (const viewer of viewers.values()) viewer.res.write(message);
   }
 
-  const sessions = () => colony.snapshot().map((s) => ({ ...s, title: options.titleFor?.(s.transcript), worktree: options.placeFor(s.cwd).worktree }));
+  const sessions = () => colony.snapshot().map((s) => ({ ...s, title: sources.get(s.source)?.title?.(s), worktree: options.placeFor(s.cwd).worktree }));
 
   function record(event: MiraEvent | null) {
     if (!event || !store.add(event)) return;
@@ -57,27 +63,23 @@ export function createHub(options: HubOptions) {
     options.onEvent?.(event);
     broadcast('event', event);
     broadcast('sessions', sessions());
+    sources.get(event.source)?.followUp?.(event, record);
   }
 
-  function eventFrom(payload: HookPayload, at: Date): MiraEvent | null {
-    const cwd = typeof payload.new_cwd === 'string' ? payload.new_cwd : typeof payload.cwd === 'string' ? payload.cwd : undefined;
-    return normalise(payload, { at: at.toISOString(), system: options.placeFor(cwd).system });
-  }
-
-  async function ingest(req: IncomingMessage, res: ServerResponse) {
+  async function ingest(req: IncomingMessage, res: ServerResponse, source: SourceAdapter) {
     const body = await readBody(req);
     res.writeHead(204).end();
     const payload = parseObject(body);
     if (!body || !payload) return;
-    options.recordShape?.('claude-code', payload, body.length);
-    record(eventFrom(payload, hookTime(req)));
+    options.recordShape?.(source.id, payload, body.length);
+    record(source.ingest?.(payload, hookTime(req)) ?? null);
   }
 
   async function permission(req: IncomingMessage, res: ServerResponse) {
     const body = await readBody(req);
     const payload = parseObject(body);
     if (body && payload) options.recordShape?.('claude-code', payload, body.length);
-    const asked = payload ? eventFrom(payload, new Date()) : null;
+    const asked = payload ? (claude?.ingest?.(payload, new Date()) ?? null) : null;
     record(asked);
     if (!payload || !asked) return void res.writeHead(204).end();
 
@@ -129,16 +131,30 @@ export function createHub(options: HubOptions) {
     res.writeHead(204).end();
   }
 
+  function story(res: ServerResponse, id: string, url: URL) {
+    const session = colony.get(id);
+    const source = session ? sources.get(session.source) : undefined;
+    if (!session || !source?.story) return reply(res, 404, 'No story for that session.');
+    const helper = url.searchParams.get('helper') ?? undefined;
+    const turns = clamp(Number(url.searchParams.get('turns') ?? STORY_TURNS), 1, 1000);
+    const told = source.story(session, { helper, turns });
+    if (!told) return reply(res, 404, "That session's transcript can't be read.");
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(told));
+  }
+
   const server = createServer((req, res) => {
     const port = (server.address() as AddressInfo).port;
     if (!fromThisMachine(req, port)) return reply(res, 403, 'Mira only accepts requests from this machine.');
     const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
     const route = `${req.method} ${url.pathname}`;
     const prompt = url.pathname.match(/^\/api\/prompts\/([\w-]+)$/);
-    if (route === 'POST /ingest/claude-code') return void ingest(req, res);
+    const ingestFor = req.method === 'POST' ? sources.get(url.pathname.match(/^\/ingest\/([a-z0-9-]+)$/)?.[1] ?? '') : undefined;
+    const storyOf = req.method === 'GET' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/story$/)?.[1] : undefined;
+    if (ingestFor?.ingest) return void ingest(req, res, ingestFor);
     if (route === 'POST /hooks/permission') return void permission(req, res);
     if (route === 'GET /api/sessions') return json(res, { sessions: sessions(), pending: permissions.pending(), waitSeconds: options.permissionWaitMs / 1000 });
     if (route === 'GET /api/events') return json(res, store.recent(clamp(Number(url.searchParams.get('limit') ?? 100), 1, 500)));
+    if (storyOf) return story(res, storyOf, url);
     if (route === 'GET /api/stream') return stream(req, res, url);
     if (route === 'POST /api/presence') return void presence(req, res);
     if (req.method === 'POST' && prompt?.[1]) return void answer(req, res, prompt[1]);
@@ -162,11 +178,14 @@ export function createHub(options: HubOptions) {
   return { server, permissions, close };
 }
 
-// Hooks and curl send no Origin header; browsers do on cross-site requests. Checking Host as well
-// stops DNS rebinding, where a site points its own name at 127.0.0.1.
+// Hooks and curl send no Origin header; browsers do on cross-site requests, and mark every request
+// with Sec-Fetch-Site. Checking Host as well stops DNS rebinding, where a site points its own name
+// at 127.0.0.1.
 function fromThisMachine(req: IncomingMessage, port: number): boolean {
   const local = [`127.0.0.1:${port}`, `localhost:${port}`];
   if (!local.includes(req.headers.host ?? '')) return false;
+  const site = req.headers['sec-fetch-site'];
+  if (site !== undefined && site !== 'same-origin' && site !== 'none') return false;
   const origin = req.headers.origin;
   return origin === undefined || local.some((host) => origin === `http://${host}`);
 }

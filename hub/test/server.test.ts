@@ -2,18 +2,33 @@ import { strict as assert } from 'node:assert';
 import { get, request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
+import { normalise } from '../src/claude-code/normalise.ts';
+import { stableId } from '../src/claude-code/source.ts';
 import { Colony } from '../src/colony.ts';
 import { createHub } from '../src/server.ts';
+import { emptyUsage, type SourceAdapter } from '../src/sources.ts';
 import { Store } from '../src/store.ts';
 
+// A stand-in for Claude Code, so these tests cover the hub and not transcript reading.
+const claude: SourceAdapter = {
+  id: 'claude-code',
+  ingest: (payload, at) => normalise(payload, { at: at.toISOString(), system: 'mira' }),
+  title: (s) => (s.transcript ? 'Hub work' : undefined),
+  story: (s, { helper }) => (s.transcript ? { sessionId: s.id, helperId: helper, usage: emptyUsage(), turns: [], earlier: 0 } : null),
+  followUp: (event, emit) => {
+    if (event.type !== 'turn.ended') return;
+    const { status, ...rest } = event;
+    emit({ ...rest, id: stableId(`usage:${event.id}`), type: 'usage.reported', usage: { inputTokens: 10, outputTokens: 20, costUsd: 0.5 } });
+  },
+};
 const store = new Store(':memory:');
 const colony = new Colony();
-const hub = createHub({ store, colony, placeFor: () => ({ system: 'mira' }), permissionWaitMs: 5000, titleFor: (t) => (t ? 'Hub work' : undefined) });
+const hub = createHub({ store, colony, sources: [claude], placeFor: () => ({ system: 'mira' }), permissionWaitMs: 5000 });
 let base = '';
 
 const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
   fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
-const sessions = async () => (await (await fetch(`${base}/api/sessions`)).json()) as { sessions: Array<{ id: string; status: string; title?: string }>; pending: Array<{ id: string; summary?: string }> };
+const sessions = async () => (await (await fetch(`${base}/api/sessions`)).json()) as { sessions: Array<{ id: string; status: string; title?: string; usage?: { tokens: number; costUsd: number } }>; pending: Array<{ id: string; summary?: string }> };
 const firstPending = async () => {
   for (let i = 0; i < 50; i++) {
     const [prompt] = (await sessions()).pending;
@@ -46,6 +61,11 @@ describe('hub server', () => {
     const res = await post('/ingest/claude-code', { hook_event_name: 'Stop', session_id: 's-evil' }, { Origin: 'https://evil.example' });
     assert.equal(res.status, 403);
     assert.equal(await statusOf('s-evil'), undefined);
+  });
+
+  it('refuses anything a browser marks as coming from another site', async () => {
+    const res = await fetch(`${base}/api/sessions/s-1/story`, { headers: { 'Sec-Fetch-Site': 'cross-site' } });
+    assert.equal(res.status, 403);
   });
 
   it('refuses requests addressed to another host name', async () => {
@@ -93,6 +113,19 @@ describe('hub server', () => {
   it('titles sessions from their transcripts', async () => {
     await post('/ingest/claude-code', { hook_event_name: 'UserPromptSubmit', session_id: 's-5', cwd: 'C:\\code\\mira', transcript_path: 'C:\\t\\s-5.jsonl' });
     assert.equal((await sessions()).sessions.find((s) => s.id === 's-5')?.title, 'Hub work');
+  });
+
+  it("tells a session's story through its source, and 404s for anything else", async () => {
+    const story = await (await fetch(`${base}/api/sessions/s-5/story?helper=a1`)).json();
+    assert.deepEqual(story, { sessionId: 's-5', helperId: 'a1', usage: emptyUsage(), turns: [], earlier: 0 });
+    assert.equal((await fetch(`${base}/api/sessions/nobody/story`)).status, 404);
+    assert.equal((await fetch(`${base}/api/sessions/s-1/story`)).status, 404); // s-1 has no transcript
+    assert.equal((await post('/ingest/not-a-source', { hook_event_name: 'Stop', session_id: 's-x' })).status, 404);
+  });
+
+  it('records what a source reports after an event, such as token use', async () => {
+    await post('/ingest/claude-code', { hook_event_name: 'Stop', session_id: 's-6', cwd: 'C:\\code\\mira', prompt_id: 'p-1' });
+    assert.deepEqual((await sessions()).sessions.find((s) => s.id === 's-6')?.usage, { tokens: 30, costUsd: 0.5 });
   });
 
   it('serves the status board', async () => {

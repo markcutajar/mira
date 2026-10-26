@@ -1,36 +1,44 @@
-// Starts the hub: rebuilds the live picture from storage and transcripts, then listens for hooks.
+// Starts the hub: rebuilds the live picture from storage and each source, then listens.
 
 import { join } from 'node:path';
 import type { MiraEvent } from '../../contracts/src/index.ts';
-import { activeSessions, isInside, sessionTitle } from './claude-code/transcripts.ts';
+import { claudeCode } from './claude-code/source.ts';
 import { Colony } from './colony.ts';
 import { claudeProjects, loadConfig, miraHome } from './config.ts';
+import { makeCostOf } from './pricing.ts';
 import { createHub } from './server.ts';
 import { shapeRecorder } from './shapes.ts';
+import type { SourceAdapter } from './sources.ts';
 import { Store } from './store.ts';
 import { makePlaceResolver } from './systems.ts';
 
 const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
 
 const config = loadConfig();
 const store = new Store(join(miraHome, 'mira.db'));
 const placeFor = makePlaceResolver(config.systems);
 const colony = new Colony();
+const sources: SourceAdapter[] = [claudeCode({ projectsDir: claudeProjects, placeFor, costOf: makeCostOf(config.prices) })];
 
-// Today's stored events first, then sessions that ran while the hub was stopped.
-for (const event of store.since(new Date(Date.now() - 24 * HOUR).toISOString())) colony.apply(event);
-const running = activeSessions(claudeProjects, Date.now() - config.activeHours * HOUR);
-colony.seed(running.map((s) => ({ ...s, system: placeFor(s.cwd).system })));
+// Today's statuses from stored events, then sessions that ran while the hub was stopped.
+const now = Date.now();
+for (const event of store.since(new Date(now - DAY).toISOString())) if (event.type !== 'usage.reported') colony.apply(event);
+for (const source of sources) {
+  colony.seed(source.id, source.discover?.(now - config.activeHours * HOUR) ?? []);
+  for (const event of source.catchUp?.(now - DAY) ?? []) store.add(event);
+}
+// Token totals for every session in view, including turns from before today.
+for (const event of store.since(new Date(now - 30 * DAY).toISOString(), 'usage.reported')) colony.apply(event);
 
 const hub = createHub({
   store,
   colony,
+  sources,
   placeFor,
   permissionWaitMs: config.permissionWaitSeconds * 1000,
   recordShape: config.recordShapes ? shapeRecorder(join(miraHome, 'recordings')) : undefined,
   onEvent: (event) => console.log(describe(event)),
-  // Transcript paths arrive in hook payloads, so only files under Claude Code's own folder are ever read.
-  titleFor: (transcript) => (transcript && isInside(claudeProjects, transcript) ? sessionTitle(transcript) : undefined),
 });
 
 hub.server.on('error', (err: NodeJS.ErrnoException) => {
@@ -54,6 +62,7 @@ process.on('SIGINT', () => {
 function describe(event: MiraEvent): string {
   const time = new Date(event.at).toTimeString().slice(0, 8);
   const who = event.actor.kind === 'subagent' ? `${event.system} › ${event.actor.name ?? 'subagent'}` : event.system;
-  const detail = event.detail?.tool ?? event.detail?.notification ?? event.detail?.reason ?? event.detail?.decision ?? '';
+  const cost = event.usage?.costUsd !== undefined ? `$${event.usage.costUsd.toFixed(2)}` : '';
+  const detail = event.detail?.tool ?? event.detail?.notification ?? event.detail?.reason ?? event.detail?.decision ?? cost;
   return `${time}  ${who.padEnd(22)} ${event.type.padEnd(22)} ${detail}`;
 }

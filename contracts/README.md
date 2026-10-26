@@ -11,15 +11,15 @@
 | Field | Meaning |
 |---|---|
 | `v` | Contract version, currently `1`. The hub rejects versions it doesn't know. |
-| `id` | A UUID for the event, assigned by the hub. |
+| `id` | A UUID for the event, assigned by the hub. A usage event's ID is derived from its turn, so the same turn always gets the same ID. |
 | `at` | When it happened, ISO 8601 with offset. |
-| `source` | `claude-code`. |
+| `source` | The agent it came from: `claude-code`, or any other source's short ID in lower-case letters, digits and dashes (decision 22). |
 | `system` | The project the event belongs to, which is one section of the island. |
 | `actor` | Who: `{ kind, id, parent?, name? }`, where `kind` is `session` or `subagent`. A subagent's `parent` is its session. |
 | `type` | What happened, for example `tool.started` or `permission.requested`. |
 | `status` | The status this event implies for its actor, when it implies one: `working`, `needs-me`, `my-turn`, `failed` or `ended`. |
-| `detail` | Small facts to show at a glance: tool name, notification type, a reason code, a duration, a working directory. |
-| `usage` | Tokens and cost, when known. |
+| `detail` | Small facts to show at a glance: tool name, notification type, a reason code, a duration, a model, a working directory. |
+| `usage` | Tokens and cost, when known. A cost the hub worked out from its price table is an estimate. |
 | `ref` | Pointers for fetching content on demand: transcript paths, and prompt and tool-use IDs. |
 
 ## Rules
@@ -51,8 +51,9 @@ Every event also keeps the session ID as `actor.id`, the working directory as `d
 | `CwdChanged` | `session.moved` | unchanged | New and previous working directory |
 | `SessionEnd` | `session.ended` | `ended` | Reason |
 | Mira answers a prompt | `permission.answered` | `working` | `decision` and `answeredBy: mira` |
+| The transcript reader, after a turn ends | `usage.reported` | unchanged | The turn's input, output and cache tokens, the context size, the model as `detail.model`, and estimated cost. A subagent's turns are reported on the subagent. |
 
-**Usage.** No hook carries token counts, which the recordings confirmed. `usage.reported` events will come from the transcript reader, the one module that parses Claude Code transcripts. `SessionStart` gives estimates when a session resumes.
+**Usage.** No hook carries token counts, which the recordings confirmed, so `usage.reported` comes from the transcript reader, the one module that parses Claude Code transcripts (decision 23). There's one event per finished turn, and its ID is derived from the actor and the turn, so the live report and the startup catch-up never count a turn twice. `costUsd` is the hub's estimate from its price table, left out for a model with no price. `SessionStart` gives estimates when a session resumes.
 
 ## Open questions
 
