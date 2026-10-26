@@ -133,5 +133,9 @@ describe('hub server', () => {
     assert.equal(res.status, 200);
     assert.match(res.headers.get('content-security-policy') ?? '', /default-src 'self'/);
     assert.match(await res.text(), /<title>Mira<\/title>/);
+    const script = await fetch(`${base}/markdown.js`);
+    assert.equal(script.status, 200);
+    assert.match(script.headers.get('content-type') ?? '', /javascript/);
+    assert.equal((await fetch(`${base}/toString`)).status, 404);
   });
 });

@@ -35,7 +35,10 @@ const MAX_BODY = 16 * 1024 * 1024;
 const STORY_TURNS = 30;
 const CLOCK_SKEW_MS = 10 * 60 * 1000;
 const HEARTBEAT_MS = 25 * 1000;
-const BOARD = new URL('../web/board.html', import.meta.url);
+const PAGES: Record<string, { file: URL; type: string }> = {
+  '/': { file: new URL('../web/board.html', import.meta.url), type: 'text/html; charset=utf-8' },
+  '/markdown.js': { file: new URL('../web/markdown.js', import.meta.url), type: 'text/javascript; charset=utf-8' },
+};
 const BOARD_POLICY = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'";
 
 export function createHub(options: HubOptions) {
@@ -158,7 +161,8 @@ export function createHub(options: HubOptions) {
     if (route === 'GET /api/stream') return stream(req, res, url);
     if (route === 'POST /api/presence') return void presence(req, res);
     if (req.method === 'POST' && prompt?.[1]) return void answer(req, res, prompt[1]);
-    if (route === 'GET /') return board(res);
+    const served = req.method === 'GET' && Object.hasOwn(PAGES, url.pathname) ? PAGES[url.pathname] : undefined;
+    if (served) return page(res, served);
     reply(res, 404, 'Not found.');
   });
 
@@ -236,9 +240,9 @@ function reply(res: ServerResponse, status: number, message: string) {
 }
 
 // Read on every request, so `npm run dev` picks up board changes without a restart.
-function board(res: ServerResponse) {
-  readFile(BOARD, (err, html) => {
-    if (err) return reply(res, 500, `The status board is missing: ${err.message}`);
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': BOARD_POLICY }).end(html);
+function page(res: ServerResponse, { file, type }: { file: URL; type: string }) {
+  readFile(file, (err, body) => {
+    if (err) return reply(res, 500, `Part of the status board is missing: ${err.message}`);
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'Content-Security-Policy': BOARD_POLICY }).end(body);
   });
 }

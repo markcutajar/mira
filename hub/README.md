@@ -10,7 +10,7 @@ npm start        # or: npm run dev, which restarts when the code changes
 
 Then open `http://127.0.0.1:4711` for the status board: sessions grouped by project with their live status and estimated cost, the event stream, and prompts waiting for an answer. While the board is open and on screen with "Answer prompts here" ticked, permission prompts wait there for up to 60 seconds before the terminal asks.
 
-Click a session's title to open its story: every turn with its prompt, replies and tool calls, the subagents it started, and tokens and estimated cost for each turn and the whole session. The latest turn starts unfolded and the panel follows the session live. A link to the board with `#session=<id>` opens that session's story. Titles and stories are read from the transcripts when needed, and never stored.
+Click a session's title to open its story: every turn with its prompt, replies and tool calls, the subagents it started, and tokens and estimated cost for each turn and the whole session. Replies are rendered from Markdown by [web/markdown.js](web/markdown.js), which escapes all text first, so HTML in a reply shows as text; links open only for http(s), and links to repo files show as their names. The latest turn starts unfolded and the panel follows the session live. A link to the board with `#session=<id>` opens that session's story. Titles and stories are read from the transcripts when needed, and never stored.
 
 On startup it rebuilds today's picture from stored events, reads recent Claude Code transcripts to find sessions that ran while it was stopped, and stores the token counts of turns that ended in the last day. Everything it keeps is in `~/.mira`:
 
@@ -58,7 +58,7 @@ The `PreToolUse` entry is repeated for `SessionStart`, `UserPromptSubmit`, `Stop
 
 | Request | Use |
 |---|---|
-| `GET /` | The status board |
+| `GET /` | The status board, with `/markdown.js` beside it |
 | `POST /ingest/<source>` | Events from a source, for example `/ingest/claude-code` for the hook commands |
 | `POST /hooks/permission` | Claude Code permission prompts, held for an answer while Mira is open |
 | `GET /api/sessions` | Live sessions and prompts waiting for an answer |

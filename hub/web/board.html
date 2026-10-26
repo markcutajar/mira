@@ -135,6 +135,31 @@
   .turn-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 0 0 14px 4px; padding-left: 12px; border-left: 2px solid var(--hull-edge); }
   .you, .reply { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.55; }
   .you { padding: 8px 10px; border-left: 3px solid var(--thronglet); background: var(--void); }
+  /* Replies rendered from Markdown by markdown.js. */
+  .md { white-space: normal; }
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
+  .md p, .md ul, .md ol, .md blockquote, .md pre, .md .md-table, .md hr { margin: 0 0 8px; }
+  .md ul, .md ol { padding-left: 22px; }
+  .md li + li { margin-top: 3px; }
+  .md li > ul, .md li > ol { margin: 3px 0 0; }
+  .md .md-h { margin: 14px 0 6px; font: 600 14px var(--font-body); color: var(--ink); }
+  .md h3.md-h { font-size: 16px; }
+  .md h4.md-h { font-size: 15px; }
+  .md strong { font-weight: 600; }
+  .md code { padding: 1px 5px; background: var(--void); font: 12px var(--font-data); }
+  .md pre { padding: 8px 10px; background: var(--void); overflow-x: auto; font: 12px/1.5 var(--font-data); white-space: pre; }
+  .md pre code { padding: 0; background: none; }
+  .md blockquote { padding-left: 10px; border-left: 3px solid var(--hull-edge); color: var(--dim); }
+  .md .md-table { overflow-x: auto; }
+  .md table { border-collapse: collapse; font-size: 12.5px; }
+  .md th, .md td { padding: 4px 8px; border: 1px solid var(--hull-edge); text-align: left; vertical-align: top; }
+  .md th { background: var(--void); font-weight: 600; }
+  .md .md-right { text-align: right; }
+  .md .md-center { text-align: center; }
+  .md a, .md .md-ref { color: var(--turn); }
+  .md .md-ref { font: 12px var(--font-data); cursor: help; }
+  .md hr { border: 0; border-top: 1px solid var(--hull-edge); }
   .tool { display: flex; gap: 8px; align-items: baseline; font: 12px var(--font-data); color: var(--dim); }
   .tool-name { flex: none; color: var(--working); }
   .tool.failed .tool-name, .failed-tag { color: var(--failed); }
@@ -189,6 +214,7 @@
 </aside>
 <p class="toast" id="toast" role="status" hidden></p>
 
+<script src="/markdown.js"></script>
 <script>
 (() => {
   'use strict';
@@ -498,7 +524,7 @@
   }
 
   function stepHTML(s) {
-    if (s.kind === 'text') return `<p class="reply">${esc(s.text)}</p>`;
+    if (s.kind === 'text') return typeof renderMarkdown === 'function' ? `<div class="reply md">${renderMarkdown(s.text)}</div>` : `<p class="reply">${esc(s.text)}</p>`;
     if (s.kind === 'note') return `<p class="note">${esc(s.text)}</p>`;
     const line = `<div class="tool${s.failed ? ' failed' : ''}"><span class="tool-name">${esc(s.name)}</span>${s.summary ? `<span class="tool-sum" title="${esc(s.summary)}">${esc(s.summary)}</span>` : ''}${s.failed ? '<span class="failed-tag">failed</span>' : ''}</div>`;
     const h = s.helper;
