@@ -8,6 +8,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { CONTRACT_VERSION, MiraEvent } from '../../contracts/src/index.ts';
 import type { Editor, EditorTarget } from './editor.ts';
+import type { Growth } from './growth.ts';
 import { Permissions, summarise, type Decision } from './permissions.ts';
 import type { Roster } from './roster.ts';
 import type { SourceAdapter } from './sources.ts';
@@ -28,6 +29,8 @@ export interface HubOptions {
   /** Opens sessions in an editor; without it the board offers no editor button. */
   editor?: Editor;
   editorDelayMs?: number;
+  /** Each project's recent commits, which grow its buildings (decision 35). */
+  growth?: { get(system: string): Growth | undefined };
 }
 
 interface Viewer {
@@ -73,7 +76,10 @@ export function createHub(options: HubOptions) {
 
   const systems = () => store.systems(new Date(Date.now() - SYSTEMS_DAYS * 86_400_000).toISOString())
     .filter((s) => s.name !== 'unknown' && !gone('system', s.name, s.lastAt))
-    .map((s) => (names.system[s.name] ? { ...s, label: names.system[s.name] } : s));
+    .map((s) => {
+      const growth = options.growth?.get(s.name);
+      return { ...s, ...(names.system[s.name] ? { label: names.system[s.name] } : {}), ...(growth ? { growth } : {}) };
+    });
 
   function record(event: MiraEvent | null) {
     if (!event || !store.add(event)) return;
@@ -268,7 +274,10 @@ export function createHub(options: HubOptions) {
     server.close();
   }
 
-  return { server, permissions, close };
+  /** Sends every page the project list again, for when something outside an event changes it, such as commit counts. */
+  const announceSystems = () => broadcast('systems', systems());
+
+  return { server, permissions, close, announceSystems };
 }
 
 // Hooks and curl send no Origin header; browsers do on cross-site requests, and mark every request

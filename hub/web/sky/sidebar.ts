@@ -82,7 +82,9 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
     const active = sessions.filter((s) => s.status && s.status !== 'ended').length;
     const needs = sessions.filter((s) => s.status === 'needs-me').length;
     const spent = sessions.reduce((sum, s) => sum + (s.usage?.costUsd ?? 0), 0);
-    const meta = sessions.length ? [`${active} active`, spent ? cost(spent) : '', needs ? `<span class="needs">${needs} need${needs === 1 ? 's' : ''} you</span>` : ''].filter(Boolean).join(' · ') : 'quiet';
+    const commits = live.systems.find((s) => s.name === system)?.growth?.commits ?? 0;
+    const made = commits ? `<span title="Commits in the last 30 days">${commits} commit${commits === 1 ? '' : 's'}</span>` : '';
+    const meta = [sessions.length ? `${active} active` : 'quiet', spent ? cost(spent) : '', made, needs ? `<span class="needs">${needs} need${needs === 1 ? 's' : ''} you</span>` : ''].filter(Boolean).join(' · ');
     const open = menus.has(system);
     return `<section class="proj${sessions.length ? '' : ' quiet'}" data-project="${esc(system)}">
       <header class="proj-head">

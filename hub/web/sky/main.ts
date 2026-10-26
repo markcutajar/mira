@@ -80,7 +80,8 @@ const sidebar = createSidebar(side, {
 
 function syncScene() {
   const labels = Object.fromEntries(live.systems.filter((s) => s.label).map((s) => [s.name, s.label as string]));
-  scene.sync(live.sessions, live.systems.map((s) => s.name), labels);
+  const growth = Object.fromEntries(live.systems.filter((s) => s.growth).map((s) => [s.name, s.growth as NonNullable<typeof s.growth>]));
+  scene.sync(live.sessions, live.systems.map((s) => s.name), labels, growth);
   $('empty').hidden = live.sessions.length > 0 || live.systems.length > 0;
 }
 

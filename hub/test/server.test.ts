@@ -28,7 +28,7 @@ const opened: string[] = [];
 const editor = { target: (folder: string) => ({ link: `vscode://file/${folder}`, name: 'mira (Workspace)' }), open: (link: string) => void opened.push(link) };
 const store = new Store(':memory:');
 const roster = new Roster();
-const hub = createHub({ store, roster, sources: [claude], placeFor: (cwd) => ({ system: 'mira', root: cwd }), permissionWaitMs: 5000, editor, editorDelayMs: 0 });
+const hub = createHub({ store, roster, sources: [claude], placeFor: (cwd) => ({ system: 'mira', root: cwd }), permissionWaitMs: 5000, editor, editorDelayMs: 0, growth: { get: (system) => (system === 'mira' ? { commits: 12, docs: 3, workshop: 2, library: 2 } : undefined) } });
 let base = '';
 
 const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -182,6 +182,11 @@ describe('hub server', () => {
   it('lists projects in the order they first appeared', async () => {
     const { systems } = (await (await fetch(`${base}/api/systems`)).json()) as { systems: Array<{ name: string }> };
     assert.deepEqual(systems.map((s) => s.name), ['mira']);
+  });
+
+  it('sends each project with its recent commits', async () => {
+    const { systems } = (await (await fetch(`${base}/api/systems`)).json()) as { systems: Array<{ growth?: unknown }> };
+    assert.deepEqual(systems[0]?.growth, { commits: 12, docs: 3, workshop: 2, library: 2 });
   });
 
   it('renames projects and sessions, and goes back to their own names', async () => {

@@ -11,6 +11,8 @@ export interface SystemInfo {
   firstAt: string;
   lastAt: string;
   label?: string;
+  /** Commits in the last 30 days, and the building levels they earn (decision 35). */
+  growth?: { commits: number; docs: number; workshop: number; library: number };
 }
 
 export interface Live {

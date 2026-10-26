@@ -6,6 +6,7 @@ import type { MiraEvent } from '../../contracts/src/index.ts';
 import { claudeCode } from './claude-code/source.ts';
 import { claudeProjects, loadConfig, miraHome } from './config.ts';
 import { vscode } from './editor.ts';
+import { GrowthTracker } from './growth.ts';
 import { makeCostOf } from './pricing.ts';
 import { Roster } from './roster.ts';
 import { createHub } from './server.ts';
@@ -43,6 +44,16 @@ for (const source of sources) {
 // Token totals for every session in view, including turns from before today.
 for (const event of store.since(new Date(now - 30 * DAY).toISOString(), 'usage.reported')) roster.apply(event);
 
+// Commits grow each project's buildings (decision 35): read from the repos its sessions worked in.
+const growth = new GrowthTracker({
+  systems: () => store.systems(new Date(Date.now() - 14 * DAY).toISOString()).map((s) => s.name),
+  rootsFor: (system) => {
+    const cwds = [...roster.snapshot().filter((s) => s.system === system && s.cwd).map((s) => s.cwd as string), ...store.folders(system)];
+    return [...new Set(cwds.map((cwd) => placeFor(cwd)).filter((p) => p.system === system && p.root).map((p) => p.root as string))];
+  },
+  onChange: () => hub.announceSystems(),
+});
+
 const hub = createHub({
   store,
   roster,
@@ -50,7 +61,11 @@ const hub = createHub({
   placeFor,
   permissionWaitMs: config.permissionWaitSeconds * 1000,
   recordShape: config.recordShapes ? shapeRecorder(join(miraHome, 'recordings')) : undefined,
-  onEvent: (event) => console.log(describe(event)),
+  onEvent: (event) => {
+    console.log(describe(event));
+    if (event.type === 'turn.ended') growth.refreshSoon(); // a turn often ends with a commit
+  },
+  growth,
   editor: vscode(),
 });
 
@@ -60,6 +75,8 @@ hub.server.on('error', (err: NodeJS.ErrnoException) => {
     : err.message);
   process.exit(1);
 });
+
+growth.start(2 * 60 * 1000);
 
 hub.server.listen(config.port, '127.0.0.1', () => {
   writeFileSync(pidFile, String(process.pid)); // so `npm run hub:stop` can find a hub running in the background

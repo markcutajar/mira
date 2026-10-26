@@ -3,7 +3,7 @@
 
 import type { MiraEvent } from '../../../contracts/src/index.ts';
 import { sessionLabel, type BoardSession } from '../shared/format.ts';
-import { ACCENT_COLOUR, ACCENTS, names, type Accent, type Art, type HouseStyle, type Palette } from './art.ts';
+import { ACCENT_COLOUR, ACCENTS, MAX_LEVEL, names, type Accent, type Art, type HouseStyle, type Palette } from './art.ts';
 import { findPath, generateCells, hash, SEC, sectionOrigin, spotsAround, templateBuildings, type BuildingType, type Cell, type Spot, type Template } from './world.ts';
 
 type Status = 'working' | 'needs-me' | 'my-turn' | 'failed' | 'ended';
@@ -21,6 +21,8 @@ interface Building extends Spot {
   door: Spot;
   style: HouseStyle;
   residents: number;
+  /** Workshops and libraries grow with the project's commits (decision 35); 1 to MAX_LEVEL. */
+  level: number;
 }
 
 interface Section {
@@ -33,6 +35,16 @@ interface Section {
   anchor: { x: number; y: number };
   label: Text;
   summary: Text;
+  /** The latest commit counts, once the hub has sent them. */
+  growth?: SectionGrowth;
+}
+
+/** A project's recent commits and the building levels they earn, as the hub sends them. */
+export interface SectionGrowth {
+  commits: number;
+  docs: number;
+  workshop: number;
+  library: number;
 }
 
 interface Helper {
@@ -82,7 +94,6 @@ export interface SkyOptions {
 // Tools that read go to the library; everything else is made in the workshop.
 const READING = new Set(['Read', 'Grep', 'Glob', 'LS', 'WebFetch', 'WebSearch', 'ToolSearch', 'NotebookRead']);
 const HOUSE_STYLES: HouseStyle[] = ['brick', 'timber', 'stone'];
-const BUILDING_LEVEL = 2;
 const DPR = () => Math.min(window.devicePixelRatio || 1, 3);
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
@@ -92,7 +103,7 @@ export class SkyScene extends Phaser.Scene {
   #options: SkyOptions;
   #art: Art;
   #ready = false;
-  #pending: { sessions: BoardSession[]; systems: string[]; labels: Record<string, string> } | null = null;
+  #pending: { sessions: BoardSession[]; systems: string[]; labels: Record<string, string>; growth: Record<string, SectionGrowth> } | null = null;
   /** Projects I removed, taken off the island once the hub confirms they're gone. */
   #forget = new Set<string>();
   #order: string[] = [];
@@ -106,6 +117,7 @@ export class SkyScene extends Phaser.Scene {
   #selectMark!: Image;
   #hoverLabel!: Text;
   #hovered: string | null = null;
+  #hoveredBuilding: Building | null = null;
   #fit = { x: 0, y: 0, w: 1, h: 1 };
   #levels: Array<{ name: string; zoom: number }> = [{ name: 'Everything', zoom: 1 }];
   #zoomIdx = 0;
@@ -123,8 +135,8 @@ export class SkyScene extends Phaser.Scene {
   // -- the page's side --
 
   /** The latest sessions, the projects in the order they first appeared, and my names for them. Safe to call before the scene starts. */
-  sync(sessions: BoardSession[], systems: string[], labels: Record<string, string> = {}): void {
-    this.#pending = { sessions, systems, labels };
+  sync(sessions: BoardSession[], systems: string[], labels: Record<string, string> = {}, growth: Record<string, SectionGrowth> = {}): void {
+    this.#pending = { sessions, systems, labels, growth };
     if (this.#ready) this.#apply();
   }
 
@@ -227,7 +239,7 @@ export class SkyScene extends Phaser.Scene {
     for (const key of this.textures.getTextureKeys()) if (!before.has(key)) this.#artKeys.add(key);
     this.#drawBackdrop();
     this.#selectMark = this.add.image(0, 0, names.select).setVisible(false);
-    this.#hoverLabel = this.#label('', { fontFamily: '"IBM Plex Sans", sans-serif', fontSize: '12px', color: '#ece8d9', backgroundColor: '#0b0d1add', padding: { x: 6, y: 3 } }).setVisible(false);
+    this.#hoverLabel = this.#label('', { fontFamily: '"IBM Plex Sans", sans-serif', fontSize: '12px', color: '#ece8d9', backgroundColor: '#0b0d1add', padding: { x: 6, y: 3 } }).setVisible(false).setDepth(600002); // above the section labels
     this.#setupInput();
     this.scale.on('resize', this.#onResize, this);
     this.events.once('shutdown', () => this.scale.off('resize', this.#onResize, this));
@@ -272,10 +284,15 @@ export class SkyScene extends Phaser.Scene {
     }
     const selected = this.#selected ? this.#mirlings.get(this.#selected) : undefined;
     if (selected) this.#selectMark.setPosition(Math.round(selected.pos.x), Math.round(selected.pos.y)).setDepth(selected.pos.y - 0.5);
-    const labelled = this.#mirlings.get(this.#hovered ?? '') ?? selected;
-    this.#hoverLabel.setVisible(Boolean(labelled));
+    // A mirling under the pointer names itself first, then a building, then the mirling whose story is open.
+    const pointed = this.#mirlings.get(this.#hovered ?? '');
+    const building = pointed ? null : this.#hoveredBuilding;
+    const labelled = pointed ?? (building ? undefined : selected);
+    this.#hoverLabel.setVisible(Boolean(labelled || building));
     if (labelled) {
       this.#hoverLabel.setText(labelled.title).setScale(ui).setPosition(Math.round(labelled.pos.x), Math.round(labelled.pos.y) - creature - (labelled.marks.beacon ? 22 * d / zoom + 4 * A : 4 * A));
+    } else if (building) {
+      this.#hoverLabel.setText(this.#buildingSays(building)).setScale(ui).setPosition(building.x, building.top - 2 * A);
     }
     for (const sec of this.#sections) {
       sec.summary.setScale(ui).setPosition(sec.anchor.x, sec.anchor.y);
@@ -301,11 +318,13 @@ export class SkyScene extends Phaser.Scene {
     for (const name of listed) if (!this.#order.includes(name)) this.#order.push(name);
     if (this.#order.length !== before) this.#grow(before);
     for (const sec of this.#sections) sec.label.setText((data.labels[sec.name] ?? sec.name).toUpperCase());
+    this.#applyGrowth(data.growth);
     this.#syncMirlings(data.sessions);
     this.#refreshSummaries();
   }
 
   #clear(): void {
+    this.#hoveredBuilding = null;
     for (const col of [...this.#mirlings.values()]) this.#retire(col, true);
     for (const sec of this.#sections) {
       for (const b of sec.buildings) b.img.destroy();
@@ -420,7 +439,12 @@ export class SkyScene extends Phaser.Scene {
       const style = HOUSE_STYLES[Math.floor(hash(tb.c, tb.r, 5) * HOUSE_STYLES.length)] as HouseStyle;
       const img = this.add.image(x, y, names.select).setDepth(y);
       const spots = spotsAround(tb, this.#walkable);
-      const b: Building = { ...tb, x, y, top: y, img, spots, door: spots[0] ?? tb, style, residents: 0 };
+      const b: Building = { ...tb, x, y, top: y, img, spots, door: spots[0] ?? tb, style, residents: 0, level: 1 };
+      if (b.type === 'workshop' || b.type === 'library') {
+        img.setInteractive({ pixelPerfect: true });
+        img.on('pointerover', () => { this.#hoveredBuilding = b; });
+        img.on('pointerout', () => { if (this.#hoveredBuilding === b) this.#hoveredBuilding = null; });
+      }
       this.#fitBuilding(b);
       sec.buildings.push(b);
       if (b.type === 'house') sec.houses.push(b);
@@ -439,7 +463,7 @@ export class SkyScene extends Phaser.Scene {
   }
 
   #fitBuilding(b: Building): void {
-    const key = b.type === 'house' ? names.house(b.style, b.residents > 0) : names.building(b.type, BUILDING_LEVEL);
+    const key = b.type === 'house' ? names.house(b.style, b.residents > 0) : names.building(b.type, b.level);
     const a = this.#art.anchor(key);
     b.img.setTexture(key).setOrigin(a.ox, a.oy);
     b.top = b.y - a.height;
@@ -630,12 +654,47 @@ export class SkyScene extends Phaser.Scene {
 
   // The tool a mirling just picked up, rising from its head.
   #floatText(col: Mirling, text: string): void {
+    this.#floatAt(col.pos.x, col.pos.y - this.#art.sizes.creature - 2 * this.#art.scale, text);
+  }
+
+  #floatAt(x: number, y: number, text: string, color = '#ffd34d'): void {
     if (reduceMotion) return;
     const A = this.#art.scale;
-    const label = this.add.text(col.pos.x, col.pos.y - this.#art.sizes.creature - 2 * A, text, { fontFamily: '"Pixelify Sans", monospace', fontSize: '12px', color: '#ffd34d', resolution: DPR() })
+    const label = this.add.text(x, y, text, { fontFamily: '"Pixelify Sans", monospace', fontSize: '12px', color, resolution: DPR() })
       .setOrigin(0.5, 1).setDepth(600001).setScale(DPR() / this.cameras.main.zoom);
     label.texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
     this.tweens.add({ targets: label, y: label.y - 14 * A, alpha: 0, duration: 1600, onComplete: () => label.destroy() });
+  }
+
+  // Workshops and libraries take their level from the project's commits. A rise after the first
+  // counts shows as the building springing up, and new commits float up from it.
+  #applyGrowth(growth: Record<string, SectionGrowth>): void {
+    for (const sec of this.#sections) {
+      const next = growth[sec.name];
+      if (!next) continue;
+      const last = sec.growth;
+      sec.growth = next;
+      for (const b of sec.buildings) {
+        if (b.type !== 'workshop' && b.type !== 'library') continue;
+        const level = Math.min(MAX_LEVEL, b.type === 'workshop' ? next.workshop : next.library);
+        const gained = b.type === 'workshop' ? next.commits - (last?.commits ?? next.commits) : next.docs - (last?.docs ?? next.docs);
+        if (level !== b.level) {
+          const grew = Boolean(last) && level > b.level;
+          b.level = level;
+          this.#fitBuilding(b);
+          if (grew && !reduceMotion) this.tweens.add({ targets: b.img, scaleY: { from: 1.15, to: 1 }, duration: 360, ease: 'Back.easeOut' });
+        }
+        if (gained > 0) this.#floatAt(b.x, b.top - 4 * this.#art.scale, `+${gained} ${b.type === 'workshop' ? 'commit' : 'doc change'}${gained === 1 ? '' : 's'}`);
+      }
+    }
+  }
+
+  #buildingSays(b: Building): string {
+    const g = this.#sections.find((sec) => sec.buildings.includes(b))?.growth;
+    const days = 30;
+    return b.type === 'workshop'
+      ? `Workshop · ${g?.commits ?? 0} commit${g?.commits === 1 ? '' : 's'} in ${days} days`
+      : `Library · ${g?.docs ?? 0} doc change${g?.docs === 1 ? '' : 's'} in ${days} days`;
   }
 
   #drawBackdrop(): void {
