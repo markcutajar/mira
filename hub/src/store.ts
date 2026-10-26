@@ -11,6 +11,7 @@ export class Store {
   #recent: StatementSync;
   #since: StatementSync;
   #sinceOfType: StatementSync;
+  #systems: StatementSync;
 
   constructor(file: string) {
     if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
@@ -35,6 +36,8 @@ export class Store {
     this.#recent = this.#db.prepare('SELECT body FROM events ORDER BY seq DESC LIMIT ?');
     this.#since = this.#db.prepare('SELECT body FROM events WHERE at >= ? ORDER BY at, seq');
     this.#sinceOfType = this.#db.prepare('SELECT body FROM events WHERE at >= ? AND type = ? ORDER BY at, seq');
+    // A folder move never makes a project of its own (decision 27).
+    this.#systems = this.#db.prepare("SELECT system, MIN(at) AS first_at, MAX(at) AS last_at FROM events WHERE type != 'session.moved' GROUP BY system HAVING MAX(at) >= ? ORDER BY first_at, system");
   }
 
   /** Stores an event; returns false if one with the same id is already stored. */
@@ -52,6 +55,11 @@ export class Store {
   since(at: string, type?: MiraEvent['type']): MiraEvent[] {
     const rows = type ? this.#sinceOfType.all(at, type) : this.#since.all(at);
     return rows.map((row) => JSON.parse(String(row.body)) as MiraEvent);
+  }
+
+  /** Every system with events since `at`, in the order each first appeared, so the island grows at its edge. */
+  systems(at: string): Array<{ name: string; firstAt: string; lastAt: string }> {
+    return this.#systems.all(at).map((row) => ({ name: String(row.system), firstAt: String(row.first_at), lastAt: String(row.last_at) }));
   }
 
   close(): void {

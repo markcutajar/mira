@@ -23,6 +23,19 @@ describe('Store', () => {
     assert.deepEqual(store.since('2026-10-25T18:00:02.000Z').map((e) => e.id), [b.id]);
     store.close();
   });
+
+  it('lists systems active since a time, in the order each first appeared', () => {
+    const store = new Store(':memory:');
+    const at = (n: number) => `2026-10-${String(n).padStart(2, '0')}T12:00:00.000Z`;
+    const add = (n: number, system: string, day: number) => store.add({ ...event(`00000000-0000-4000-8000-00000000010${n}`, at(day)), system });
+    add(1, 'garden', 10);
+    add(2, 'mira', 12);
+    add(3, 'old', 1);
+    add(4, 'garden', 20);
+    store.add({ ...event('00000000-0000-4000-8000-000000000105', at(15)), system: 'projects', type: 'session.moved', status: undefined });
+    assert.deepEqual(store.systems(at(5)).map((s) => [s.name, s.firstAt, s.lastAt]), [['garden', at(10), at(20)], ['mira', at(12), at(12)]]);
+    store.close();
+  });
 });
 
 describe('placeFor', () => {

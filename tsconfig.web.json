@@ -1,0 +1,12 @@
+{
+  // Browser code: the board, the sky and what they share. The hub strips the types as it serves them.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "types": ["phaser"]
+  },
+  "include": ["hub/web/**/*.ts"],
+  "exclude": []
+}

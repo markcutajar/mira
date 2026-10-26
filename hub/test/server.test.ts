@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
 import { normalise } from '../src/claude-code/normalise.ts';
 import { stableId } from '../src/claude-code/source.ts';
-import { Colony } from '../src/colony.ts';
+import { Roster } from '../src/roster.ts';
 import { createHub } from '../src/server.ts';
 import { emptyUsage, type SourceAdapter } from '../src/sources.ts';
 import { Store } from '../src/store.ts';
@@ -26,8 +26,8 @@ const claude: SourceAdapter = {
 const opened: string[] = [];
 const editor = { target: (folder: string) => ({ link: `vscode://file/${folder}`, name: 'mira (Workspace)' }), open: (link: string) => void opened.push(link) };
 const store = new Store(':memory:');
-const colony = new Colony();
-const hub = createHub({ store, colony, sources: [claude], placeFor: () => ({ system: 'mira' }), permissionWaitMs: 5000, editor, editorDelayMs: 0 });
+const roster = new Roster();
+const hub = createHub({ store, roster, sources: [claude], placeFor: () => ({ system: 'mira' }), permissionWaitMs: 5000, editor, editorDelayMs: 0 });
 let base = '';
 
 const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -150,5 +150,24 @@ describe('hub server', () => {
     assert.equal(script.status, 200);
     assert.match(script.headers.get('content-type') ?? '', /javascript/);
     assert.equal((await fetch(`${base}/toString`)).status, 404);
+  });
+
+  it('serves the sky, its modules with their types stripped, and Phaser', async () => {
+    assert.match(await (await fetch(`${base}/sky`)).text(), /<title>Mira Sky<\/title>/);
+    const module = await fetch(`${base}/shared/format.ts`);
+    assert.match(module.headers.get('content-type') ?? '', /javascript/);
+    const code = await module.text();
+    assert.match(code, /export const esc/);
+    assert.doesNotMatch(code, /import type|: BoardSession\)/);
+    assert.match((await fetch(`${base}/shared/mira.css`)).headers.get('content-type') ?? '', /css/);
+    assert.equal((await fetch(`${base}/vendor/phaser.js`)).status, 200);
+    assert.equal((await fetch(`${base}/shared/nope.ts`)).status, 404);
+    assert.equal((await fetch(`${base}/shared/..%2Fsrc%2Fmain.ts`)).status, 404);
+    assert.equal((await fetch(`${base}/src/main.ts`)).status, 404);
+  });
+
+  it('lists projects in the order they first appeared', async () => {
+    const { systems } = (await (await fetch(`${base}/api/systems`)).json()) as { systems: Array<{ name: string }> };
+    assert.deepEqual(systems.map((s) => s.name), ['mira']);
   });
 });

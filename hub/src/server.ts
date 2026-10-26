@@ -4,22 +4,22 @@
 // Server-Sent Events. Each source plugs in through its adapter (decision 22).
 
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { CONTRACT_VERSION, MiraEvent } from '../../contracts/src/index.ts';
-import type { Colony } from './colony.ts';
 import type { Editor } from './editor.ts';
 import { Permissions, summarise, type Decision } from './permissions.ts';
+import type { Roster } from './roster.ts';
 import type { SourceAdapter } from './sources.ts';
 import type { Store } from './store.ts';
 import type { Place } from './systems.ts';
+import { serveWeb, webFile } from './web.ts';
 
 type Payload = Record<string, unknown>;
 
 export interface HubOptions {
   store: Store;
-  colony: Colony;
+  roster: Roster;
   sources: SourceAdapter[];
   placeFor: (cwd: string | undefined) => Place;
   permissionWaitMs: number;
@@ -40,14 +40,10 @@ const STORY_TURNS = 30;
 const EDITOR_DELAY_MS = 1500;
 const CLOCK_SKEW_MS = 10 * 60 * 1000;
 const HEARTBEAT_MS = 25 * 1000;
-const PAGES: Record<string, { file: URL; type: string }> = {
-  '/': { file: new URL('../web/board.html', import.meta.url), type: 'text/html; charset=utf-8' },
-  '/markdown.js': { file: new URL('../web/markdown.js', import.meta.url), type: 'text/javascript; charset=utf-8' },
-};
-const BOARD_POLICY = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'";
+const SYSTEMS_DAYS = 14;
 
 export function createHub(options: HubOptions) {
-  const { store, colony } = options;
+  const { store, roster } = options;
   const sources = new Map(options.sources.map((s) => [s.id, s]));
   // Permission prompts are Claude Code's own hook, answered in its own format.
   const claude = sources.get('claude-code');
@@ -63,11 +59,11 @@ export function createHub(options: HubOptions) {
     for (const viewer of viewers.values()) viewer.res.write(message);
   }
 
-  const sessions = () => colony.snapshot().map((s) => ({ ...s, title: sources.get(s.source)?.title?.(s), worktree: options.placeFor(s.cwd).worktree }));
+  const sessions = () => roster.snapshot().map((s) => ({ ...s, title: sources.get(s.source)?.title?.(s), worktree: options.placeFor(s.cwd).worktree }));
 
   function record(event: MiraEvent | null) {
     if (!event || !store.add(event)) return;
-    colony.apply(event);
+    roster.apply(event);
     options.onEvent?.(event);
     broadcast('event', event);
     broadcast('sessions', sessions());
@@ -140,7 +136,7 @@ export function createHub(options: HubOptions) {
   }
 
   function story(res: ServerResponse, id: string, url: URL) {
-    const session = colony.get(id);
+    const session = roster.get(id);
     const source = session ? sources.get(session.source) : undefined;
     if (!session || !source?.story) return reply(res, 404, 'No story for that session.');
     const helper = url.searchParams.get('helper') ?? undefined;
@@ -153,7 +149,7 @@ export function createHub(options: HubOptions) {
   // GET says which editor window holds the session, for the board's link; POST then opens the
   // session there, after the board's link has had a moment to bring that window forward.
   function editor(req: IncomingMessage, res: ServerResponse, id: string) {
-    const session = colony.get(id);
+    const session = roster.get(id);
     const at = session ? sources.get(session.source)?.continueAt?.(session) : undefined;
     const target = at ? options.editor?.target(at.folder) : undefined;
     if (!at || !target) return reply(res, 404, "That session can't be opened in an editor.");
@@ -180,8 +176,9 @@ export function createHub(options: HubOptions) {
     if (route === 'GET /api/stream') return stream(req, res, url);
     if (route === 'POST /api/presence') return void presence(req, res);
     if (req.method === 'POST' && prompt?.[1]) return void answer(req, res, prompt[1]);
-    const served = req.method === 'GET' && Object.hasOwn(PAGES, url.pathname) ? PAGES[url.pathname] : undefined;
-    if (served) return page(res, served);
+    if (route === 'GET /api/systems') return json(res, { systems: store.systems(new Date(Date.now() - SYSTEMS_DAYS * 86_400_000).toISOString()).filter((s) => s.name !== 'unknown') });
+    const served = req.method === 'GET' ? webFile(url.pathname) : undefined;
+    if (served) return void serveWeb(res, served);
     reply(res, 404, 'Not found.');
   });
 
@@ -256,12 +253,4 @@ function json(res: ServerResponse, data: unknown) {
 
 function reply(res: ServerResponse, status: number, message: string) {
   res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' }).end(message);
-}
-
-// Read on every request, so `npm run dev` picks up board changes without a restart.
-function page(res: ServerResponse, { file, type }: { file: URL; type: string }) {
-  readFile(file, (err, body) => {
-    if (err) return reply(res, 500, `Part of the status board is missing: ${err.message}`);
-    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'Content-Security-Policy': BOARD_POLICY }).end(body);
-  });
 }

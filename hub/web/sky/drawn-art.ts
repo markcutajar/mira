@@ -1,0 +1,420 @@
+// Placeholder pixel art, drawn in code at the detailed 2× size (decisions 14 and 25). Every
+// picture is registered under a name from art.ts, so an art pack can replace this module whole.
+
+import { ACCENT_COLOUR, ACCENTS, MAX_LEVEL, names, type Anchor, type Art, type HouseStyle, type Palette } from './art.ts';
+
+type Ctx = CanvasRenderingContext2D;
+
+const A = 2; // screen pixels per art pixel
+const TW = 32 * A;
+const TH = 16 * A;
+const SIDE = 8 * A;
+
+const C = {
+  grass: ['#4f9a3c', '#55a141', '#4a9238'], grassSpeck: ['#62b84f', '#3f8530', '#5aad46'], lip: '#3a7a2c',
+  dirt: '#9b6b3f', dirtSpeck: ['#b07e4c', '#86592f'], dirtLip: '#7d5430',
+  water: '#3d7fd1', waterGlint: '#8cc4f5', waterRim: '#2c5ea0',
+  sideL: '#7a5233', sideR: '#5e3e26', strata: '#4b3120',
+  rock: ['#3b2a2a', '#33242a'], rockDeep: '#261b22', crystal: ['#6ff3ff', '#b48cff'],
+  flowers: ['#f4f1e6', '#ffd34d', '#ff9ec7'],
+};
+
+const PAL: Record<Palette, Record<string, string>> = {
+  y: { o: '#5a3b12', y: '#ffd34d', h: '#fff1a8', s: '#e0a42a', d: '#c08420', e: '#1b1420', w: '#ffffff', m: '#7a3a12', k: '#ff9e7a', f: '#5a3b12' },
+  g: { o: '#34343c', y: '#8e8e98', h: '#b9b9c2', s: '#6e6e78', d: '#5a5a63', e: '#1b1420', w: '#d0d0d6', m: '#3a3a42', k: '#9a8a90', f: '#34343c' },
+};
+
+// Hand-placed pixel maps; each letter is a colour from the palette passed with it.
+const MAPS = {
+  creature: {
+    a: [
+      '.....oo....oo.....', '....ohyo..oyyo....', '...ohyyooooyyso...', '..ohyyyyyyyyyyso..',
+      '.ohyyyyyyyyyyyyso.', '.ohyyweyyyyweyyso.', 'ohyyyeeyyyyeeyyyso', 'oyyyyeeyyyyeeyyyso',
+      'oyykkyyymmyyykkyso', 'oyyyyyyyyyyyyyyyso', 'oyyyyyyyyyyyyyysso', '.oyyyyyyyyyyyysso.',
+      '.osyyyyyyyyyyssdo.', '..ossyyyyyyyssdo..', '...oossssssssdo...', '.....oooooooo.....',
+      '....offo..offo....', '....oooo..oooo....',
+    ],
+    b: [
+      '.....oo....oo.....', '....ohyo..oyyo....', '...ohyyooooyyso...', '..ohyyyyyyyyyyso..',
+      '.ohyyyyyyyyyyyyso.', '.ohyyweyyyyweyyso.', 'ohyyyeeyyyyeeyyyso', 'oyyyyeeyyyyeeyyyso',
+      'oyykkyyymmyyykkyso', 'oyyyyyyyyyyyyyyyso', 'oyyyyyyyyyyyyyysso', '.oyyyyyyyyyyyysso.',
+      '.osyyyyyyyyyyssdo.', '..ossyyyyyyyssdo..', '...oossssssssdo...', '.....oooooooo.....',
+      '...offo....offo...', '...oooo....oooo...',
+    ],
+  },
+  helper: {
+    a: ['....oooo....', '..oohyyyoo..', '.ohyyyyyyso.', '.oyeyyyeyso.', 'oyyeyyyeyyso', 'oyyyymmyyyso', 'oyyyyyyyyyso', '.osyyyyysso.', '..oosssssoo.', '....oooo....', '...of..fo...', '...oo..oo...'],
+    b: ['....oooo....', '..oohyyyoo..', '.ohyyyyyyso.', '.oyeyyyeyso.', 'oyyeyyyeyyso', 'oyyyymmyyyso', 'oyyyyyyyyyso', '.osyyyyysso.', '..oosssssoo.', '....oooo....', '..of....fo..', '..oo....oo..'],
+  },
+  beacon: ['....oooo....', '..ooOOOOoo..', '.ohOOOOOOOo.', '.ohOOwwOOOo.', 'oOOOOwwOOOOo', 'oOOOOwwOOOOo', 'oOOOOwwOOOOo', 'oOOOOwwOOOOo', 'oOOOOOOOOOOo', 'oOOOOwwOOOOo', '.oOOOwwOOOo.', '.oOOOOOOOOo.', '..ooOOOOoo..', '....oOOo....', '.....oo.....', '.....oo.....'],
+  bubble: ['..oooooooooooo..', '.oWWWWWWWWWWWWo.', 'oWWWWWWWWWWWWWWo', 'oWWddWWddWWddWWo', 'oWWddWWddWWddWWo', 'oWWWWWWWWWWWWWWo', '.oWWWWWWWWWWWWo.', '..oooWWooooooo..', '....oWWo........', '....oWo.........', '....oo..........'],
+  smoke: ['..gggg..', '.gGGGGg.', 'gGGhGGGg', 'gGhGGGGg', 'gGGGGGGg', 'gGGGGGgg', '.gGGGgg.', '..gggg..'],
+};
+
+function mulberry32(seed: number): () => number {
+  return () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const pick = <T>(list: T[], rnd: () => number) => list[Math.floor(rnd() * list.length)] as T;
+
+function shade(hex: string, f: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = (v: number) => Math.max(0, Math.min(255, Math.round(v * f)));
+  return `#${((1 << 24) | (ch((n >> 16) & 255) << 16) | (ch((n >> 8) & 255) << 8) | ch(n & 255)).toString(16).slice(1)}`;
+}
+
+function rect(ctx: Ctx | null, color: string, x: number, y: number, w: number, h: number) {
+  if (!ctx) return;
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.round(x), Math.round(y), w, h);
+}
+
+/** A stepped 2:1 diamond centred on (cx, cy); records the lowest painted row of each column. */
+function diamond(ctx: Ctx | null, color: string, cx: number, cy: number, hw: number, bottoms?: number[]) {
+  const hh = hw / 2;
+  for (let i = 0; i < hh; i++) {
+    const half = (i + 1) * 2;
+    rect(ctx, color, cx - half, cy - hh + i, half * 2, 1);
+  }
+  for (let i = 0; i < hh; i++) {
+    const half = hw - i * 2;
+    rect(ctx, color, cx - half, cy + i, half * 2, 1);
+    if (bottoms) for (let x = cx - half; x < cx + half; x++) bottoms[x] = cy + i;
+  }
+}
+
+function bottomsFor(cx: number, cy: number, hw: number): number[] {
+  const bottoms: number[] = [];
+  diamond(null, '', cx, cy, hw, bottoms);
+  return bottoms;
+}
+
+const TILE_BOTTOMS = bottomsFor(TW / 2, TH / 2, TW / 2);
+const insideTile = (x: number, y: number) => Math.abs(x + 0.5 - TW / 2) / (TW / 2) + Math.abs(y + 0.5 - TH / 2) / (TH / 2) <= 0.86;
+
+/** An isometric box with a flat or pyramid roof. Sizes are in 1× units and scaled by A here. */
+interface BuildingSpec {
+  hw: number;
+  wallH: number;
+  roofH?: number;
+  extraTop?: number;
+  texture?: 'brick' | 'timber' | 'stone' | 'planks';
+  wallL: string;
+  wallR: string;
+  top?: string;
+  topInner?: string;
+  roofL?: string;
+  roofR?: string;
+  eave?: string;
+  walls?: (ctx: Ctx, cx: number, bottoms: number[], wallH: number, hw: number) => void;
+  extras?: (ctx: Ctx, cx: number, topY: number, roofH: number) => void;
+}
+
+export function drawnArt(): Art {
+  const anchors = new Map<string, Anchor>();
+  let scene!: Phaser.Scene;
+
+  function canvasTex(key: string, w: number, h: number, draw: (ctx: Ctx) => void) {
+    if (scene.textures.exists(key)) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d') as Ctx;
+    ctx.imageSmoothingEnabled = false;
+    draw(ctx);
+    scene.textures.addCanvas(key, canvas);
+  }
+
+  function pixelMap(key: string, rows: string[], palette: Record<string, string>) {
+    canvasTex(key, rows[0]?.length ?? 1, rows.length, (ctx) => {
+      rows.forEach((row, y) => [...row].forEach((ch, x) => { const color = palette[ch]; if (color) rect(ctx, color, x, y, 1, 1); }));
+    });
+  }
+
+  function tileTex(key: string, top: string, speckles: string[], lip: string, rnd: () => number, extra?: (ctx: Ctx) => void) {
+    canvasTex(key, TW, TH + SIDE, (ctx) => {
+      diamond(ctx, top, TW / 2, TH / 2, TW / 2);
+      for (let i = 0; i < 22 * A * A; i++) {
+        const x = Math.floor(rnd() * TW);
+        const y = Math.floor(rnd() * TH);
+        if (insideTile(x, y)) rect(ctx, pick(speckles, rnd), x, y, 1, 1);
+      }
+      extra?.(ctx);
+      for (let x = 0; x < TW; x++) {
+        const b = TILE_BOTTOMS[x] ?? 0;
+        for (let k = 1; k <= SIDE; k++) {
+          let color = x < TW / 2 ? C.sideL : C.sideR;
+          if (k <= A) color = lip;
+          else if (k % (3 * A) === 0) color = C.strata;
+          else if (rnd() < 0.03) color = '#8a6240';
+          rect(ctx, color, x, b + k, 1, 1);
+        }
+      }
+    });
+  }
+
+  function building(key: string, raw: BuildingSpec) {
+    const hw = raw.hw * A;
+    const wallH = raw.wallH * A;
+    const roofH = (raw.roofH ?? 0) * A;
+    const extraTop = (raw.extraTop ?? 0) * A;
+    const w = hw * 2 + 2;
+    const h = wallH + roofH + hw + 2 + extraTop;
+    const cx = hw + 1;
+    const gy = h - hw / 2;
+    const bottoms = bottomsFor(cx, gy, hw);
+    anchors.set(key, { ox: cx / w, oy: gy / h, height: gy });
+    canvasTex(key, w, h, (ctx) => {
+      for (let x = cx - hw; x < cx + hw; x++) rect(ctx, x < cx ? raw.wallL : raw.wallR, x, (bottoms[x] ?? 0) - wallH + 1, 1, wallH);
+      if (raw.texture) {
+        for (let x = cx - hw; x < cx + hw; x++) {
+          const line = raw.texture === 'timber' ? '#6b4a2e' : shade(x < cx ? raw.wallL : raw.wallR, raw.texture === 'brick' ? 1.16 : 0.88);
+          for (let k = 1; k < wallH; k++) {
+            const course = Math.floor(k / 3);
+            const mark = raw.texture === 'brick' ? k % 3 === 0 || (x + (course % 2) * 3) % 6 === 0
+              : raw.texture === 'stone' ? k % 4 === 0 || (x + (Math.floor(k / 4) % 2) * 4) % 8 === 0
+              : raw.texture === 'timber' ? (x - cx) % 5 === 0 || k === Math.floor(wallH / 2)
+              : (x - cx) % 3 === 0;
+            if (mark) rect(ctx, line, x, (bottoms[x] ?? 0) - k, 1, 1);
+          }
+        }
+      }
+      raw.walls?.(ctx, cx, bottoms, wallH, hw);
+      const topY = gy - wallH;
+      if (!roofH) {
+        diamond(ctx, raw.top ?? raw.wallL, cx, topY, hw);
+        diamond(ctx, raw.topInner ?? raw.top ?? raw.wallL, cx, topY, hw - 2 * A);
+      } else {
+        for (let x = cx - hw; x < cx + hw; x++) {
+          const t = 1 - Math.abs(x + 0.5 - cx) / hw;
+          const yTop = Math.round(topY - roofH * t);
+          const yBot = (bottoms[x] ?? 0) - wallH;
+          const base = (x < cx ? raw.roofL : raw.roofR) ?? raw.wallL;
+          rect(ctx, base, x, yTop, 1, yBot - yTop + 1);
+          for (let y = yBot - 2; y > yTop; y -= 3) rect(ctx, shade(base, 0.82), x, y, 1, 1);
+          rect(ctx, raw.eave ?? base, x, yBot, 1, 1);
+        }
+      }
+      raw.extras?.(ctx, cx, topY, roofH);
+    });
+  }
+
+  function hedge(key: string, blossom: string, seed: number) {
+    const rnd = mulberry32(seed * 31 + A);
+    const hw = 16;
+    building(key, {
+      hw, wallH: 6, wallL: '#3a8436', wallR: '#2b6829', top: '#4c9f42', topInner: '#4c9f42',
+      walls: (ctx, cx, bottoms, wallH, hwPx) => {
+        for (let i = 0; i < 30 * A * A; i++) {
+          const x = cx - hwPx + Math.floor(rnd() * hwPx * 2);
+          rect(ctx, rnd() < 0.5 ? '#245a23' : '#4c9f42', x, (bottoms[x] ?? 0) - Math.floor(rnd() * wallH), 1, 1);
+        }
+      },
+      extras: (ctx, cx, topY) => {
+        const hwPx = hw * A;
+        for (let i = 0; i < 40 * A * A; i++) {
+          const x = Math.floor(rnd() * hwPx * 2) - hwPx;
+          const y = Math.floor(rnd() * hwPx) - hwPx / 2;
+          if (Math.abs(x + 0.5) / hwPx + Math.abs(y + 0.5) / (hwPx / 2) > 0.85) continue;
+          const roll = rnd();
+          rect(ctx, roll < 0.12 ? blossom : roll < 0.55 ? '#6cbf4f' : '#3a8436', cx + x, topY + y, 1, 1);
+        }
+      },
+    });
+  }
+
+  function tree(key: string, apples: boolean) {
+    const rnd = mulberry32(apples ? 77 : 55);
+    const w = 22;
+    const h = 28;
+    const blobs: Array<[number, number, number]> = [[11, 10, 9], [6, 14, 5.5], [16, 14, 5.5]];
+    const inside = (x: number, y: number) => blobs.some(([bx, by, br]) => Math.hypot(x + 0.5 - bx, y + 0.5 - by) <= br);
+    canvasTex(key, w, h, (ctx) => {
+      rect(ctx, '#6b4423', 9, 16, 4, 10);
+      rect(ctx, '#4f311a', 12, 16, 1, 10);
+      rect(ctx, '#6b4423', 8, 25, 6, 2);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          if (!inside(x, y)) continue;
+          const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+          const light = (x + y) / (w + 18) + rnd() * 0.12;
+          rect(ctx, edge ? '#24552a' : light < 0.42 ? '#62b84f' : light < 0.72 ? '#3f8f3a' : '#2d6b2b', x, y, 1, 1);
+        }
+      }
+      for (let i = 0; i < 26; i++) {
+        const x = Math.floor(rnd() * w);
+        const y = Math.floor(rnd() * 20);
+        if (inside(x, y) && inside(x + 1, y + 1)) rect(ctx, '#7fd062', x, y, 1, 1);
+      }
+      if (apples) for (const [x, y] of [[7, 9], [14, 7], [12, 15], [17, 13]] as Array<[number, number]>) { rect(ctx, '#e04b3a', x, y, 2, 2); rect(ctx, '#ff8a7a', x, y, 1, 1); }
+    });
+  }
+
+  function tiles() {
+    const rnd = mulberry32(1234 + A);
+    const tufts = (ctx: Ctx) => {
+      for (let i = 0; i < 9; i++) {
+        let x = 0;
+        let y = 0;
+        do { x = 2 + Math.floor(rnd() * (TW - 4)); y = 2 + Math.floor(rnd() * (TH - 4)); } while (!insideTile(x, y));
+        rect(ctx, '#3a7a2c', x, y, 1, 1); rect(ctx, '#7fd062', x + 1, y - 1, 1, 1); rect(ctx, '#3a7a2c', x + 2, y, 1, 1);
+      }
+    };
+    C.grass.forEach((g, i) => tileTex(names.tile(`grass${i}` as 'grass0'), g, C.grassSpeck, C.lip, rnd, tufts));
+    tileTex(names.tile('flowers'), C.grass[0] as string, C.grassSpeck, C.lip, rnd, (ctx) => {
+      tufts(ctx);
+      for (let i = 0; i < 5; i++) {
+        let x = 0;
+        let y = 0;
+        do { x = Math.floor(rnd() * TW); y = Math.floor(rnd() * TH); } while (!insideTile(x, y) || !insideTile(x + A, y + A));
+        rect(ctx, pick(C.flowers, rnd), x, y, 2, 2); rect(ctx, '#ffd34d', x, y, 1, 1); rect(ctx, '#2f6e27', x + 1, y + 2, 1, 1);
+      }
+    });
+    tileTex(names.tile('path'), C.dirt, C.dirtSpeck, C.dirtLip, rnd, (ctx) => {
+      for (let i = 0; i < 8; i++) {
+        const x = Math.floor(rnd() * TW);
+        const y = Math.floor(rnd() * TH);
+        if (insideTile(x, y) && insideTile(x + 2, y + 1)) { rect(ctx, '#c49866', x, y, 2, 1); rect(ctx, '#6e4a2a', x, y + 1, 2, 1); }
+      }
+    });
+    tileTex(names.tile('water'), C.water, [C.water], C.waterRim, rnd, (ctx) => {
+      for (let x = 0; x < TW; x++) for (let y = 0; y < TH; y++) if (insideTile(x, y) && !insideTile(x, y + A)) rect(ctx, C.waterRim, x, y, 1, 1);
+      for (const [x, y] of [[9, 7], [18, 5], [15, 10]] as Array<[number, number]>) rect(ctx, C.waterGlint, x * A, y * A, 2 * A, 1);
+    });
+  }
+
+  function buildings() {
+    const trim = '#e3c79d';
+    const houseWalls = (lit: boolean) => (ctx: Ctx, cx: number, bottoms: number[], wallH: number, hw: number) => {
+      const door = cx - Math.round(hw * 0.55);
+      const dw = 3 * A;
+      const dh = 5 * A;
+      for (let x = door; x < door + dw; x++) rect(ctx, '#3a2418', x, (bottoms[x] ?? 0) - dh, 1, dh);
+      for (let x = door - 1; x <= door + dw; x++) rect(ctx, trim, x, (bottoms[x] ?? 0) - dh - 1, 1, 1);
+      rect(ctx, trim, door - 1, (bottoms[door - 1] ?? 0) - dh, 1, dh);
+      rect(ctx, '#ffd34d', door + dw - 2, (bottoms[door + dw - 2] ?? 0) - 3 * A, 1, 1);
+      const glass = lit ? '#ffe08a' : '#2a2f45';
+      for (const start of [cx + 3 * A, cx + hw - 5 * A]) {
+        for (let x = start; x < start + 2 * A; x++) {
+          const y = (bottoms[x] ?? 0) - wallH + 3 * A;
+          rect(ctx, glass, x, y, 1, 2 * A);
+          rect(ctx, trim, x, y - 1, 1, 1);
+          rect(ctx, trim, x, y + 2 * A, 1, 1);
+        }
+        rect(ctx, trim, start + A, (bottoms[start + A] ?? 0) - wallH + 3 * A, 1, 2 * A);
+      }
+    };
+    const chimney = (ctx: Ctx, cx: number, topY: number, roofH: number) => {
+      const y = Math.round(topY - roofH * 0.5) - 4 * A;
+      rect(ctx, '#7a3a2a', cx + 4 * A, y, 2 * A, 5 * A);
+      rect(ctx, '#4a2418', cx + 4 * A, y, 2 * A, 1);
+    };
+    const houseStyles: Record<HouseStyle, Pick<BuildingSpec, 'texture' | 'wallL' | 'wallR' | 'roofL' | 'roofR' | 'eave'>> = {
+      brick: { texture: 'brick', wallL: '#b5523b', wallR: '#8e3d2c', roofL: '#55658a', roofR: '#3d4a68', eave: '#262f45' },
+      timber: { texture: 'timber', wallL: '#eadfc4', wallR: '#c9bb98', roofL: '#c0563c', roofR: '#94402c', eave: '#5e2416' },
+      stone: { texture: 'stone', wallL: '#aeb0bb', wallR: '#878995', roofL: '#3f8f86', roofR: '#2f6e67', eave: '#1f4d48' },
+    };
+    for (const [style, colors] of Object.entries(houseStyles) as Array<[HouseStyle, typeof houseStyles.brick]>) {
+      for (const lit of [true, false]) building(names.house(style, lit), { hw: 12, wallH: 9, roofH: 8, extraTop: 4, extras: chimney, ...colors, walls: houseWalls(lit) });
+    }
+
+    for (let level = 1; level <= MAX_LEVEL; level++) {
+      building(names.building('library', level), {
+        hw: 14, wallH: 10 + (level - 1) * 6, texture: 'stone', wallL: '#d9cdb0', wallR: '#b3a688', top: '#5d7fb8', topInner: '#4a6699',
+        walls: (ctx, cx, bottoms) => {
+          for (let x = cx - 12 * A; x < cx + 12 * A; x++) {
+            if ((x - cx + 12 * A) % (3 * A) >= A || Math.abs(x + 0.5 - cx) < A) continue;
+            for (let f = 0; f < level; f++) rect(ctx, f % 2 ? '#ffe08a' : '#7d93c4', x, (bottoms[x] ?? 0) - 4 * A - f * 6 * A, 1, 2 * A);
+          }
+        },
+      });
+      building(names.building('workshop', level), {
+        hw: 14, wallH: 8 + (level - 1) * 4, roofH: 7 + level, extraTop: 8, texture: 'planks',
+        wallL: '#a8744a', wallR: '#7f5636', roofL: '#e07a3f', roofR: '#b85d2c', eave: '#7a3a1a',
+        walls: (ctx, cx, bottoms) => {
+          for (let x = cx - 9 * A; x < cx - 5 * A; x++) rect(ctx, (x - cx) % 2 ? '#3a2416' : '#4a2e1c', x, (bottoms[x] ?? 0) - 6 * A, 1, 6 * A);
+          for (let x = cx + 5 * A; x < cx + 7 * A; x++) rect(ctx, '#ffe08a', x, (bottoms[x] ?? 0) - 6 * A, 1, 2 * A);
+        },
+        extras: (ctx, cx, topY, roofH) => {
+          const y = Math.round(topY - roofH * 0.45) - 6 * A;
+          rect(ctx, '#5e3e26', cx + 4 * A, y, 3 * A, 7 * A);
+          rect(ctx, '#3b2a2a', cx + 4 * A, y, 3 * A, A);
+        },
+      });
+    }
+  }
+
+  return {
+    scale: A,
+    tile: { w: TW, h: TH, side: SIDE },
+    sizes: { creature: MAPS.creature.a.length, beacon: MAPS.beacon.length, bubble: MAPS.bubble.length },
+
+    create(s) {
+      scene = s;
+      if (scene.textures.exists(names.tile('grass0'))) return;
+      tiles();
+      for (const palette of Object.keys(PAL) as Palette[]) {
+        for (const frame of ['a', 'b'] as const) {
+          pixelMap(names.creature(palette, frame), MAPS.creature[frame], PAL[palette]);
+          pixelMap(names.helper(palette, frame), MAPS.helper[frame], PAL[palette]);
+        }
+      }
+      tree(names.tree(false), false);
+      tree(names.tree(true), true);
+      pixelMap(names.beacon, MAPS.beacon, { o: '#7a2e0b', O: '#ff8a3d', h: '#ffc38f', w: '#fff7ec' });
+      pixelMap(names.bubble, MAPS.bubble, { o: '#2a2f45', W: '#f4f1e6', d: '#5a5f7a' });
+      pixelMap(names.smoke, MAPS.smoke, { g: '#5f5f68', G: '#8b8b95', h: '#b4b4bd' });
+      canvasTex(names.select, 16 * A, 8 * A, (ctx) => {
+        const hw = 8 * A;
+        const hh = 4 * A;
+        for (let i = 0; i < hh; i++) {
+          const up = (i + 1) * 2;
+          const down = hw - i * 2;
+          rect(ctx, '#ffd34d', hw - up, i, A + 1, 1); rect(ctx, '#ffd34d', hw + up - A - 1, i, A + 1, 1);
+          rect(ctx, '#ffd34d', hw - down, hh + i, A + 1, 1); rect(ctx, '#ffd34d', hw + down - A - 1, hh + i, A + 1, 1);
+        }
+      });
+      ACCENTS.forEach((accent, i) => hedge(names.hedge(accent), ACCENT_COLOUR[accent], i + 1));
+      buildings();
+    },
+
+    anchor(key) {
+      return anchors.get(key) ?? { ox: 0.5, oy: 1, height: 0 };
+    },
+
+    underside(s, columns, key) {
+      scene = s;
+      const depth = 96 * A;
+      const xs = [...columns.keys()];
+      const ys = [...columns.values()];
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const half = (maxX - minX) / 2 || 1;
+      const mid = minX + half;
+      const rnd = mulberry32(xs.length * 31 + A);
+      const noise = Array.from({ length: Math.ceil((maxX - minX + 1) / (4 * A)) + 1 }, () => rnd());
+      canvasTex(key, maxX - minX + 1, maxY - minY + depth + 4, (ctx) => {
+        for (let X = minX; X <= maxX; X++) {
+          const top = columns.get(X);
+          if (top === undefined) continue;
+          const t = Math.abs(X - mid) / half;
+          let d = depth * Math.pow(Math.max(0, 1 - t), 1.3) * (0.72 + (noise[Math.floor((X - minX) / (4 * A))] ?? 0) * 0.45);
+          d = Math.max(2 * A, Math.round(d / (3 * A)) * 3 * A);
+          const y0 = top - minY + 1;
+          for (let k = 0; k < d; k++) {
+            const color = k < 2 * A ? C.strata : k > d - 4 * A ? C.rockDeep : (C.rock[Math.floor(k / (5 * A)) % 2] as string);
+            rect(ctx, color, X - minX, y0 + k, 1, 1);
+          }
+          if (d > 16 * A && rnd() < 0.05 / A) rect(ctx, pick(C.crystal, rnd), X - minX, y0 + 4 * A + Math.floor(rnd() * (d - 10 * A)), A, 2 * A);
+        }
+      });
+    },
+  };
+}

@@ -9,12 +9,13 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning hub/src/main.ts",
     "dev": "node --disable-warning=ExperimentalWarning --watch hub/src/main.ts",
-    "typecheck": "tsc -p .",
+    "typecheck": "tsc -p . && tsc -p tsconfig.web.json",
     "test": "node --disable-warning=ExperimentalWarning --test \"contracts/test/*.test.ts\" \"hub/test/*.test.ts\"",
     "contract:schema": "node contracts/scripts/emit-schema.ts",
     "recorder": "node tools/hook-recorder/recorder.mjs"
   },
   "dependencies": {
+    "phaser": "3.90.0",
     "zod": "4.6.7"
   },
   "devDependencies": {

@@ -19,6 +19,7 @@ export interface ClaudeCodeOptions {
 }
 
 const SOURCE = 'claude-code';
+const PROJECTS_KEPT = 1000;
 
 export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
   const { projectsDir, placeFor, costOf } = options;
@@ -29,6 +30,14 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
   const usageOf = (actor: Actor, system: string, turns: Turn[], ref: (turn: Turn) => MiraEvent['ref']) =>
     turns.filter((t) => t.state !== 'running').map((t) => usageEvent(actor, system, t, ref(t))).filter((e): e is MiraEvent => e !== null);
 
+  // Each session's project, as its latest event outside a folder move named it.
+  const projects = new Map<string, string>();
+  const remember = (sessionId: string, system: string) => {
+    projects.delete(sessionId);
+    projects.set(sessionId, system);
+    if (projects.size > PROJECTS_KEPT) projects.delete(projects.keys().next().value as string);
+  };
+
   const helperEvents = (file: string, sessionId: string, system: string, name?: string) => {
     const helper = helperAt(file, costOf);
     const actor = compact({ kind: 'subagent' as const, id: helper.id, parent: sessionId, name: name ?? helper.name });
@@ -38,9 +47,16 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
   return {
     id: SOURCE,
 
+    // A session belongs to the project it started in (decision 27). When its shell changes folder,
+    // the move is recorded under that project, not the folder it moved to.
     ingest(payload, at) {
-      const cwd = typeof payload.new_cwd === 'string' ? payload.new_cwd : typeof payload.cwd === 'string' ? payload.cwd : undefined;
-      return normalise(payload, { at: at.toISOString(), system: placeFor(cwd).system });
+      const sessionId = typeof payload.session_id === 'string' ? payload.session_id : '';
+      const moved = payload.hook_event_name === 'CwdChanged';
+      const cwd = typeof payload.cwd === 'string' ? payload.cwd : undefined;
+      const known = projects.get(sessionId);
+      const system = moved ? (known ?? placeFor(typeof payload.old_cwd === 'string' ? payload.old_cwd : cwd).system) : placeFor(cwd).system;
+      if (!moved && sessionId) remember(sessionId, system);
+      return normalise(payload, { at: at.toISOString(), system });
     },
 
     discover(sinceMs) {

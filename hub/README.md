@@ -12,6 +12,8 @@ Then open `http://127.0.0.1:4711` for the status board: sessions grouped by proj
 
 Click a session's title to open its story: every turn with its prompt, replies and tool calls, the subagents it started, and tokens and estimated cost for each turn and the whole session. Replies are rendered from Markdown by [web/markdown.js](web/markdown.js), which escapes all text first, so HTML in a reply shows as text; links open only for http(s), and links to repo files show as their names. The latest turn starts unfolded and the panel follows the session live. "Continue in VS Code" at the top opens the conversation in Claude Code's chat panel, in the VS Code window whose workspace holds the session's folder, or in a new window on that folder. A link to the board with `#session=<id>` opens that session's story. Titles and stories are read from the transcripts when needed, and never stored.
 
+Open `http://127.0.0.1:4711/sky` for the sky: the island with a hedged section per project, in the order projects first appeared, and a mirling per session (decision 28). Mirlings work at the library (reading tools) or workshop (everything else), raise a beacon when they need you, wait by their house with a speech bubble when it's your turn, smoke when they fail, and go home when they end. Helpers follow them while subagents run. Click a mirling for its story; "Needs you" flies to the next one waiting. Drag to move, scroll or use the buttons to zoom.
+
 On startup it rebuilds today's picture from stored events, reads recent Claude Code transcripts to find sessions that ran while it was stopped, and stores the token counts of turns that ended in the last day. Everything it keeps is in `~/.mira`:
 
 | Path | What |
@@ -58,7 +60,10 @@ The `PreToolUse` entry is repeated for `SessionStart`, `UserPromptSubmit`, `Stop
 
 | Request | Use |
 |---|---|
-| `GET /` | The status board, with `/markdown.js` beside it |
+| `GET /` | The status board |
+| `GET /sky` | The sky |
+| `GET /shared/…`, `/sky/…` | The browser modules (TypeScript, sent with types stripped) and styles, plus `/markdown.js` and `/vendor/phaser.js` |
+| `GET /api/systems` | Projects active in the last 14 days, in the order each first appeared |
 | `POST /ingest/<source>` | Events from a source, for example `/ingest/claude-code` for the hook commands |
 | `POST /hooks/permission` | Claude Code permission prompts, held for an answer while Mira is open |
 | `GET /api/sessions` | Live sessions and prompts waiting for an answer |
@@ -73,6 +78,12 @@ The `PreToolUse` entry is repeated for `SessionStart`, `UserPromptSubmit`, `Stop
 ## Adding a source
 
 Each source is an adapter (decision 22), defined in [src/sources.ts](src/sources.ts). Every piece is optional: `ingest` turns what the source posts to `/ingest/<id>` into an event, `discover` finds its sessions at startup, `catchUp` fills in what was missed while the hub was stopped, `followUp` adds events that follow from one just recorded, `title` names a session, and `story` tells it for the panel. Claude Code's adapter is [src/claude-code/source.ts](src/claude-code/source.ts). To add an agent, write its adapter, add it to the list in [src/main.ts](src/main.ts), and point the agent's hooks at `/ingest/<id>`.
+
+## The browser side
+
+[web/board.html](web/board.html) and [web/sky.html](web/sky.html) share the live connection, the story panel and the styles in [web/shared/](web/shared/). The sky's code is in [web/sky/](web/sky/): the island layout (`world.ts`), the scene (`scene.ts`) and the art. Browser code is TypeScript, which the hub sends with its types stripped (decision 26), so there's still no build step; `npm run typecheck` checks it against the DOM and Phaser's types.
+
+**Swapping in an art pack (decision 25).** Every picture the sky uses has a name in [web/sky/art.ts](web/sky/art.ts), and [web/sky/drawn-art.ts](web/sky/drawn-art.ts) draws them all in code. A pack replaces it with one module that implements the same `Art` interface: load the pack's atlas in `preload`, register its frames under the same names in `create`, give buildings their anchors, and pass it to the scene in [web/sky/main.ts](web/sky/main.ts).
 
 ## Safety
 

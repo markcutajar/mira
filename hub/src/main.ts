@@ -3,10 +3,10 @@
 import { join } from 'node:path';
 import type { MiraEvent } from '../../contracts/src/index.ts';
 import { claudeCode } from './claude-code/source.ts';
-import { Colony } from './colony.ts';
 import { claudeProjects, loadConfig, miraHome } from './config.ts';
 import { vscode } from './editor.ts';
 import { makeCostOf } from './pricing.ts';
+import { Roster } from './roster.ts';
 import { createHub } from './server.ts';
 import { shapeRecorder } from './shapes.ts';
 import type { SourceAdapter } from './sources.ts';
@@ -19,22 +19,22 @@ const DAY = 24 * HOUR;
 const config = loadConfig();
 const store = new Store(join(miraHome, 'mira.db'));
 const placeFor = makePlaceResolver(config.systems);
-const colony = new Colony();
+const roster = new Roster();
 const sources: SourceAdapter[] = [claudeCode({ projectsDir: claudeProjects, placeFor, costOf: makeCostOf(config.prices) })];
 
 // Today's statuses from stored events, then sessions that ran while the hub was stopped.
 const now = Date.now();
-for (const event of store.since(new Date(now - DAY).toISOString())) if (event.type !== 'usage.reported') colony.apply(event);
+for (const event of store.since(new Date(now - DAY).toISOString())) if (event.type !== 'usage.reported') roster.apply(event);
 for (const source of sources) {
-  colony.seed(source.id, source.discover?.(now - config.activeHours * HOUR) ?? []);
+  roster.seed(source.id, source.discover?.(now - config.activeHours * HOUR) ?? []);
   for (const event of source.catchUp?.(now - DAY) ?? []) store.add(event);
 }
 // Token totals for every session in view, including turns from before today.
-for (const event of store.since(new Date(now - 30 * DAY).toISOString(), 'usage.reported')) colony.apply(event);
+for (const event of store.since(new Date(now - 30 * DAY).toISOString(), 'usage.reported')) roster.apply(event);
 
 const hub = createHub({
   store,
-  colony,
+  roster,
   sources,
   placeFor,
   permissionWaitMs: config.permissionWaitSeconds * 1000,
@@ -51,7 +51,7 @@ hub.server.on('error', (err: NodeJS.ErrnoException) => {
 });
 
 hub.server.listen(config.port, '127.0.0.1', () => {
-  const sessions = colony.snapshot();
+  const sessions = roster.snapshot();
   console.log(`Mira hub on http://127.0.0.1:${config.port} · ${sessions.length} session${sessions.length === 1 ? '' : 's'} in view · data in ${miraHome}`);
 });
 

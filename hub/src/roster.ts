@@ -47,21 +47,24 @@ interface Session extends Omit<SessionView, 'subagents'> {
 const ENDED_TURNS_KEPT = 50;
 const ENDED_VISIBLE_MS = 60 * 60 * 1000;
 
-export class Colony {
+export class Roster {
   #sessions = new Map<string, Session>();
 
   apply(event: MiraEvent): void {
     const sessionId = event.actor.kind === 'subagent' ? event.actor.parent : event.actor.id;
     if (!sessionId) return;
-    // Token counts add to a session the colony already knows; they never bring an old one back.
+    // Token counts add to a session the roster already knows; they never bring an old one back.
     if (event.type === 'usage.reported') return this.#addUsage(sessionId, event);
     const s = this.#session(sessionId, event);
+    // A session stays in the project it started in (decision 27): the shell moving to another
+    // folder is recorded, but changes neither its section nor its folder.
+    const moved = event.type === 'session.moved';
     if (event.at >= s.lastAt) {
       s.lastAt = event.at;
-      s.system = event.system;
+      if (!moved) s.system = event.system;
     }
     if (event.ref?.transcript) s.transcript = event.ref.transcript;
-    if (event.detail?.cwd) s.cwd = event.detail.cwd;
+    if (event.detail?.cwd && !moved) s.cwd = event.detail.cwd;
     if (event.detail?.permissionMode) s.permissionMode = event.detail.permissionMode;
     if (event.detail?.tool) s.lastTool = event.detail.tool;
     s.seenIn = 'events';

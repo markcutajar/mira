@@ -26,7 +26,7 @@
 
 - **No content.** Every object is strict, so unknown fields are rejected, and text fields are short. Prompts, file contents, command output, assistant messages and error text never enter an event. Panels fetch them from the source when they open.
 - **Status.** An actor's status is the status of its latest event that carries one. Subagent events never change their session's status.
-- **System.** For Claude Code, the hub maps a session's working directory to a system. By default the system is the repo's folder name, so a new project gets its own section with no setup. A config file only renames or groups projects. `session.moved` can move a session to another system.
+- **System.** For Claude Code, the hub maps a session's working directory to a system. By default the system is the repo's folder name, so a new project gets its own section with no setup. A config file only renames or groups projects. A session stays in the system it started in: `session.moved` records its shell changing folder, but doesn't move it (decision 27).
 - **Versioning.** Adding an optional field or a new event type is not breaking. Renaming or removing anything, or changing a meaning, bumps `v`.
 
 ## Claude Code hooks
@@ -48,7 +48,7 @@ Every event also keeps the session ID as `actor.id`, the working directory as `d
 | `StopFailure` | `turn.failed` | `failed` | Error type (`rate_limit`, `overloaded`…) as `reason` |
 | `SubagentStart` | `subagent.started` | `working`, on the subagent | Agent type as the subagent's name, session as its parent |
 | `SubagentStop` | `subagent.stopped` | `ended`, on the subagent | Subagent transcript path |
-| `CwdChanged` | `session.moved` | unchanged | New and previous working directory |
+| `CwdChanged` | `session.moved` | unchanged | New and previous working directory. The event belongs to the session's project, and doesn't move the session (decision 27). |
 | `SessionEnd` | `session.ended` | `ended` | Reason |
 | Mira answers a prompt | `permission.answered` | `working` | `decision` and `answeredBy: mira` |
 | The transcript reader, after a turn ends | `usage.reported` | unchanged | The turn's input, output and cache tokens, the context size, the model as `detail.model`, and estimated cost. A subagent's turns are reported on the subagent. |

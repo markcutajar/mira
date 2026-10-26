@@ -3,7 +3,7 @@
 // ingest alone and add discovery or a story panel later.
 
 import type { MiraEvent, Status } from '../../contracts/src/index.ts';
-import type { SessionView } from './colony.ts';
+import type { SessionView } from './roster.ts';
 
 export interface UsageTotals {
   input: number;

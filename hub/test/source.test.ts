@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import type { MiraEvent } from '../../contracts/src/index.ts';
 import { claudeCode, stableId } from '../src/claude-code/source.ts';
-import type { SessionView } from '../src/colony.ts';
 import { makeCostOf } from '../src/pricing.ts';
+import type { SessionView } from '../src/roster.ts';
 import { RESPONSE_USD, writeSession } from './fixtures.ts';
 
 describe('Claude Code source', () => {
@@ -46,6 +46,19 @@ describe('Claude Code source', () => {
     assert.equal(source.title?.(session(transcript)), 'Fix the bug');
     assert.equal(source.story?.(session(join(tmpdir(), 'elsewhere.jsonl')), { turns: 30 }), null);
     assert.equal(source.story?.(session(transcript), { turns: 30, helper: '../../etc' }), null);
+  });
+
+  it('files a folder move under the project the session started in', () => {
+    const projectOf = (cwd: string | undefined) => ({ system: cwd?.split('\\').pop() ?? 'unknown' });
+    const adapter = claudeCode({ projectsDir: dir, placeFor: projectOf, costOf: makeCostOf() });
+    const at = new Date('2026-10-25T18:00:00.000Z');
+    assert.equal(adapter.ingest?.({ hook_event_name: 'UserPromptSubmit', session_id: 's-9', cwd: 'C:\\code\\mira' }, at)?.system, 'mira');
+    const moved = adapter.ingest?.({ hook_event_name: 'CwdChanged', session_id: 's-9', cwd: 'C:\\x\\projects', old_cwd: 'C:\\code\\mira', new_cwd: 'C:\\x\\projects' }, at);
+    assert.equal(moved?.type, 'session.moved');
+    assert.equal(moved?.system, 'mira');
+    assert.equal(moved?.detail?.cwd, 'C:\\x\\projects');
+    // A move the hub hears about first falls back to the folder the shell left.
+    assert.equal(adapter.ingest?.({ hook_event_name: 'CwdChanged', session_id: 's-10', old_cwd: 'C:\\code\\garden', new_cwd: 'C:\\tmp' }, at)?.system, 'garden');
   });
 
   it('links a session to the Claude Code extension, by its UUID only', () => {

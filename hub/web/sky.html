@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Mira Sky</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Pixelify+Sans:wght@400;600&display=swap">
+<link rel="stylesheet" href="/shared/mira.css">
+<style>
+  /* The sky (build plan step 5): the island fills the window; the HUD floats above it. */
+  html, body { height: 100%; }
+  body { overflow: hidden; }
+  #sky { position: fixed; inset: 0; }
+  #sky canvas { display: block; }
+  .fallback { margin: 0; padding: 24px; max-width: 60ch; color: var(--dim); }
+
+  .hud { position: fixed; inset: 0; z-index: 1; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; gap: 10px; padding: 12px 16px; }
+  .hud-top, .hud-bottom { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+  .hud-top { align-items: flex-start; }
+  .hud-bottom { align-items: flex-end; }
+  .glass { background: var(--hull-glass); border: 2px solid var(--hull-edge); box-shadow: 0 0 0 2px var(--void), inset 0 2px 0 var(--hull-shine); pointer-events: auto; }
+
+  .brand { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; padding: 7px 12px 8px; }
+  .wordmark { font-family: var(--font-display); font-weight: 600; font-size: 22px; letter-spacing: 0.08em; color: var(--thronglet); }
+  .sub { font-family: var(--font-display); font-size: 14px; color: var(--dim); }
+  .switch { font-family: var(--font-display); font-size: 14px; color: var(--turn); text-decoration: none; }
+  .switch:hover { color: var(--thronglet); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; pointer-events: auto; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; font-family: var(--font-display); font-size: 13px; color: var(--ink); }
+  .chip i { width: 8px; height: 8px; background: var(--c); box-shadow: 0 0 0 1px var(--void); }
+  .chip b { font-family: var(--font-data); font-weight: 500; font-variant-numeric: tabular-nums; }
+  button.chip { cursor: pointer; }
+  button.chip:disabled { cursor: default; color: var(--dim); opacity: 1; }
+  .chip.on { border-color: var(--beacon); animation: beat 1.2s steps(2) infinite; }
+  @keyframes beat { 50% { box-shadow: 0 0 0 2px var(--void), 0 0 0 4px var(--beacon-dim); } }
+
+  .status { display: flex; align-items: center; gap: 14px; padding: 7px 12px; }
+  .hold { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--dim); cursor: pointer; }
+  .hold input { accent-color: var(--thronglet); }
+  .conn { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); }
+  .conn::before { content: ""; width: 8px; height: 8px; background: var(--working); }
+  .conn[data-state="down"]::before { background: var(--failed); }
+
+  .empty { align-self: center; max-width: 46ch; margin: 0; padding: 14px 16px; color: var(--dim); text-align: center; }
+
+  .stream { width: min(560px, 100%); min-width: 0; padding: 8px 12px 10px; }
+  .stream .eyebrow { margin-bottom: 6px; }
+  #events { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font: 12px var(--font-data); }
+  #events li { display: grid; grid-template-columns: 8ch 16ch 18ch minmax(0, 1fr); gap: 10px; white-space: nowrap; }
+  #events span { overflow: hidden; text-overflow: ellipsis; }
+  #events .t, #events .what { color: var(--dim); }
+  #events .type { color: var(--thronglet); }
+  #events li:nth-child(n+5) { display: none; }
+
+  .zoom { display: flex; align-items: center; }
+  .zoom button { width: 38px; height: 34px; background: transparent; border: 0; color: var(--ink); font: 20px/1 var(--font-display); cursor: pointer; }
+  .zoom button:disabled { color: var(--hull-edge); cursor: default; }
+  .zoom span { min-width: 10ch; text-align: center; font-family: var(--font-display); font-size: 13px; }
+
+  @media (max-width: 640px) {
+    .chips { flex-basis: 100%; }
+    .chip { padding: 5px 8px; font-size: 12px; }
+    #events li { grid-template-columns: 8ch 18ch minmax(0, 1fr); }
+    #events .who { display: none; }
+    #events li:nth-child(n+3) { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chip.on { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div id="sky" aria-label="Island map"></div>
+<div class="hud">
+  <header class="hud-top" id="hud-top">
+    <div class="brand glass"><span class="wordmark">MIRA</span><span class="sub">Sky</span><a class="switch" href="/">Board →</a></div>
+    <nav class="chips" aria-label="Sessions by status">
+      <span class="chip glass" data-status="working"><i></i>Working <b id="n-working">0</b></span>
+      <button type="button" class="chip glass" id="chip-needs" data-status="needs-me" title="Go to the next mirling that needs you" disabled><i></i>Needs you <b id="n-needs-me">0</b></button>
+      <span class="chip glass" data-status="my-turn"><i></i>Your turn <b id="n-my-turn">0</b></span>
+      <span class="chip glass" data-status="failed"><i></i>Failed <b id="n-failed">0</b></span>
+    </nav>
+    <div class="status glass">
+      <label class="hold" title="While this tab is open and on screen, permission prompts wait here before the terminal asks."><input type="checkbox" id="hold"> Answer prompts here</label>
+      <span class="conn" id="conn" data-state="down" role="status">Connecting…</span>
+    </div>
+  </header>
+  <p class="empty glass" id="empty" hidden>No projects yet. Start a Claude Code session in any repo and it arrives as a new section of the island.</p>
+  <footer class="hud-bottom" id="hud-bottom">
+    <section class="stream glass" aria-label="Event stream">
+      <h2 class="eyebrow">Event stream</h2>
+      <ol id="events"></ol>
+    </section>
+    <div class="zoom glass" role="group" aria-label="Zoom">
+      <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
+      <span id="zoom-label">Everything</span>
+      <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+    </div>
+  </footer>
+</div>
+<script src="/vendor/phaser.js"></script>
+<script src="/markdown.js"></script>
+<script type="module" src="/sky/main.ts"></script>
+</body>
+</html>
