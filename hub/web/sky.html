@@ -45,10 +45,24 @@
   .conn::before { content: ""; width: 8px; height: 8px; background: var(--working); }
   .conn[data-state="down"]::before { background: var(--failed); }
 
-  .empty { align-self: center; max-width: 46ch; margin: 0; padding: 14px 16px; color: var(--dim); text-align: center; }
+  .hud-middle { flex: 1; min-height: 0; display: flex; align-items: flex-start; gap: 10px; }
+  .empty { max-width: 46ch; margin: auto; padding: 14px 16px; color: var(--dim); text-align: center; }
+
+  .project-card { width: min(360px, 100%); max-height: 100%; overflow: auto; padding: 12px 14px 14px; display: grid; gap: 10px; }
+  .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .card-head .eyebrow { margin: 0 0 2px; }
+  .card-head h2 { margin: 0; font: 600 18px var(--font-display); overflow-wrap: anywhere; }
+  .card-sessions { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .card-sessions li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline; font-size: 13px; }
+  .card-sessions .faint { font: 11px var(--font-data); }
+  .title-btn { all: unset; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .title-btn:hover { color: var(--thronglet); }
+  .title-btn:focus-visible { outline: 2px solid var(--thronglet); outline-offset: 2px; }
 
   .stream { width: min(560px, 100%); min-width: 0; padding: 8px 12px 10px; }
-  .stream .eyebrow { margin-bottom: 6px; }
+  .stream-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; margin-bottom: 6px; }
+  .stream .eyebrow { margin: 0; }
+  .stream .hint { font-size: 11px; }
   #events { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font: 12px var(--font-data); }
   #events li { display: grid; grid-template-columns: 8ch 16ch 18ch minmax(0, 1fr); gap: 10px; white-space: nowrap; }
   #events span { overflow: hidden; text-overflow: ellipsis; }
@@ -89,10 +103,13 @@
       <span class="conn" id="conn" data-state="down" role="status">Connecting…</span>
     </div>
   </header>
-  <p class="empty glass" id="empty" hidden>No projects yet. Start a Claude Code session in any repo and it arrives as a new section of the island.</p>
+  <div class="hud-middle">
+    <aside class="project-card glass" id="project-card" aria-label="Project" hidden></aside>
+    <p class="empty glass" id="empty" hidden>No projects yet. Start a Claude Code session in any repo and it arrives as a new section of the island.</p>
+  </div>
   <footer class="hud-bottom" id="hud-bottom">
     <section class="stream glass" aria-label="Event stream">
-      <h2 class="eyebrow">Event stream</h2>
+      <div class="stream-head"><h2 class="eyebrow">Event stream</h2><span class="hint">Click a mirling for its story · click a project's name for its sessions</span></div>
       <ol id="events"></ol>
     </section>
     <div class="zoom glass" role="group" aria-label="Zoom">

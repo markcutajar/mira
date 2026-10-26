@@ -5,6 +5,8 @@ export interface Place {
   system: string;
   /** Set when the folder is a git worktree: the worktree's own folder name. */
   worktree?: string;
+  /** The project's own folder: the repo root, the main repo for a worktree, or the folder itself outside a repo. */
+  root?: string;
 }
 
 /** What a folder's `.git` entry says: a repo of its own, a link to a git dir elsewhere, or nothing. */
@@ -34,16 +36,16 @@ export function makePlaceResolver(renames: Record<string, string>, gitMarker = r
     if (marker.kind === 'link') {
       const gitdir = isAbsolute(marker.gitdir) ? marker.gitdir : resolve(root, marker.gitdir);
       const main = gitdir.replace(/\\/g, '/').match(/^(.*)\/\.git\/worktrees\/[^/]+\/?$/)?.[1];
-      if (main) return { system: named(basename(main)), worktree: folder.slice(0, 80) };
+      if (main) return { system: named(basename(main)), worktree: folder.slice(0, 80), root: resolve(main) };
     }
-    return { system: named(folder) };
+    return { system: named(folder), root };
   }
 
   return function placeFor(cwd: string | undefined): Place {
     if (!cwd) return { system: 'unknown' };
     const known = cache.get(cwd);
     if (known) return known;
-    let place: Place = { system: named(basename(resolve(cwd)) || cwd) };
+    let place: Place = { system: named(basename(resolve(cwd)) || cwd), root: resolve(cwd) };
     for (let dir = resolve(cwd); ; dir = dirname(dir)) {
       const marker = gitMarker(dir);
       if (marker) {

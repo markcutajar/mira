@@ -34,7 +34,10 @@
 
   #sections { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 16px; align-items: start; }
   .project { padding: 12px 14px 4px; }
-  .project > header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-bottom: 8px; }
+  .project > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; padding-bottom: 8px; }
+  .project > header .summary { margin-left: auto; }
+  .project-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .row-actions { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
   .project h2 { margin: 0; font: 600 18px var(--font-display); overflow-wrap: anywhere; }
   .summary { font-size: 12px; color: var(--dim); white-space: nowrap; }
   .needs { color: var(--beacon); font-weight: 500; }
@@ -90,9 +93,11 @@
 
 <script src="/markdown.js"></script>
 <script type="module">
-  import { ago, answerPrompt, clock, cost, esc, folder, sessionLabel, short, STATUS_LABEL, toast, tokens } from '/shared/format.ts';
+  import { ago, answerPrompt, clock, cost, esc, folder, projectLabel, sessionLabel, short, STATUS_LABEL, toast, tokens } from '/shared/format.ts';
+  import { removeThing, renameThing } from '/shared/manage.ts';
   import { createPanel, linkedSession } from '/shared/panel.ts';
   import { connectLive } from '/shared/live.ts';
+  import { openStart } from '/shared/start.ts';
 
   const $ = (id) => document.getElementById(id);
   const ORDER = ['needs-me', 'failed', 'my-turn', 'working', 'ended', null];
@@ -104,12 +109,14 @@
     session: (id) => live.sessions.find((s) => s.id === id),
     pending: () => live.pending,
     waitSeconds: () => live.waitSeconds,
+    projectLabel: (system) => projectLabel(system, live.systems),
     onChange: () => renderSessions(),
   });
 
   const live = connectLive({
     hold: $('hold'),
     onConnection: renderConnection,
+    onSystems: () => { renderSessions(); panel.refresh(); },
     onSessions: () => { renderSessions(); renderCounts(); panel.refresh(); },
     onPending: () => { renderPrompts(); renderCounts(); panel.refresh(); },
     onEvent: (event) => panel.event(event),
@@ -173,8 +180,10 @@
     const active = list.filter((s) => s.status && s.status !== 'ended').length;
     const spent = list.reduce((sum, s) => sum + (s.usage?.costUsd ?? 0), 0);
     const spend = spent ? ` · <span title="Estimated cost of these sessions' finished turns">${cost(spent)}</span>` : '';
+    const name = projectLabel(system, live.systems);
     return `<section class="project box">
-      <header><h2>${esc(system)}</h2><span class="summary">${active} active${spend}${needs ? ` · <span class="needs">${needs} need${needs === 1 ? 's' : ''} you</span>` : ''}</span></header>
+      <header><h2${name !== system ? ` title="${esc(system)}"` : ''}>${esc(name)}</h2><span class="summary">${active} active${spend}${needs ? ` · <span class="needs">${needs} need${needs === 1 ? 's' : ''} you</span>` : ''}</span>
+        <span class="project-actions"><button type="button" class="ghost small" data-rename-system="${esc(system)}">Rename</button><button type="button" class="ghost small" data-remove-system="${esc(system)}">Remove</button><button type="button" class="ghost small" data-start="${esc(system)}" title="Start a new Claude Code session in ${esc(name)}, in VS Code">+ New session</button></span></header>
       ${list.map(sessionHTML).join('')}
     </section>`;
   }
@@ -198,13 +207,17 @@
         <div class="meta">${meta}</div>
         ${helpers.length ? `<div class="helpers">${helpers.map((a) => `<span class="helper">${esc(a.name || 'subagent')}</span>`).join('')}</div>` : ''}
       </div>
-      ${s.cwd ? `<button type="button" class="ghost small" data-resume="${esc(s.id)}" title="Copy a command that resumes this session">Copy resume</button>` : ''}
+      <div class="row-actions">
+        ${s.cwd ? `<button type="button" class="ghost small" data-resume="${esc(s.id)}" title="Copy a command that resumes this session">Copy resume</button>` : ''}
+        <button type="button" class="ghost small" data-remove-session="${esc(s.id)}" title="Take this session off the board and the island until it's active again">Remove</button>
+      </div>
     </div>`;
   }
 
   function renderEvents() {
     $('events').innerHTML = live.events.slice(0, 60).map((e) => {
-      const who = e.actor.kind === 'subagent' ? `${e.system} › ${e.actor.name || 'subagent'}` : e.system;
+      const project = projectLabel(e.system, live.systems);
+      const who = e.actor.kind === 'subagent' ? `${project} › ${e.actor.name || 'subagent'}` : project;
       const what = e.detail?.tool ?? e.detail?.notification ?? e.detail?.reason ?? e.detail?.decision ?? '';
       return `<li><span class="t">${esc(clock(e.at))}</span><span class="line">${esc(who)} <span class="type">${esc(e.type)}</span> <span class="what">${esc(what)}</span></span></li>`;
     }).join('') || '<li class="faint">Events appear here as they happen.</li>';
@@ -248,7 +261,15 @@
     const resumeButton = e.target.closest('[data-resume]');
     if (resumeButton) return void copyResume(resumeButton);
     const openButton = e.target.closest('[data-open]');
-    if (openButton) panel.open(openButton.dataset.open);
+    if (openButton) return panel.open(openButton.dataset.open);
+    const startButton = e.target.closest('[data-start]');
+    if (startButton) return void openStart(startButton.dataset.start, projectLabel(startButton.dataset.start, live.systems));
+    const renameSystem = e.target.closest('[data-rename-system]')?.dataset.renameSystem;
+    if (renameSystem) return void renameThing('system', renameSystem, projectLabel(renameSystem, live.systems));
+    const removeSystem = e.target.closest('[data-remove-system]')?.dataset.removeSystem;
+    if (removeSystem) return void removeThing('system', removeSystem, projectLabel(removeSystem, live.systems));
+    const removeSession = live.sessions.find((x) => x.id === e.target.closest('[data-remove-session]')?.dataset.removeSession);
+    if (removeSession) void removeThing('session', removeSession.id, sessionLabel(removeSession)).then((done) => { if (done && panel.current() === removeSession.id) panel.close(); });
   });
 
   renderSessions();

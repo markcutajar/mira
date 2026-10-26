@@ -121,6 +121,19 @@ button:disabled { opacity: 0.5; cursor: default; }
 .md .md-ref { font: 12px var(--font-data); cursor: help; }
 .md hr { border: 0; border-top: 1px solid var(--hull-edge); }
 
+/* Dialogs: starting a session, renaming, removing. */
+.dialog { width: min(560px, calc(100% - 32px)); padding: 0; color: var(--ink); }
+.dialog::backdrop { background: rgba(11, 13, 26, 0.65); }
+.dialog-body { display: grid; gap: 12px; padding: 14px 16px 16px; }
+.dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dialog-head h2 { margin: 2px 0 0; font: 600 18px var(--font-display); overflow-wrap: anywhere; }
+.dialog-body .meta { margin: 0; font: 13px var(--font-body); }
+.dialog-body .meta span { font: 12px var(--font-data); overflow-wrap: anywhere; }
+.dialog-field { display: grid; gap: 4px; }
+.dialog-field .eyebrow { margin: 0; }
+.dialog textarea, .dialog input[type="text"] { width: 100%; padding: 8px 10px; resize: vertical; background: var(--void); color: var(--ink); border: 2px solid var(--hull-edge); font: 13.5px/1.5 var(--font-body); }
+.dialog textarea:focus-visible, .dialog input[type="text"]:focus-visible { outline: 2px solid var(--thronglet); outline-offset: 0; }
+
 .toast { position: fixed; left: 50%; bottom: 20px; z-index: 4; transform: translateX(-50%); max-width: min(640px, calc(100% - 32px)); padding: 10px 14px; background: var(--hull); border: 2px solid var(--hull-edge); font-size: 13px; overflow-wrap: anywhere; user-select: all; }
 
 @media (max-width: 960px) {

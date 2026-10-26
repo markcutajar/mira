@@ -70,6 +70,8 @@ export interface SkyOptions {
   insets(): { top: number; bottom: number };
   /** A mirling was clicked. */
   onSelect(id: string): void;
+  /** A section's name was clicked. */
+  onSection?(name: string): void;
   /** The zoom level changed: its name, and whether it can go closer or further. */
   onZoom?(name: string, closer: boolean, further: boolean): void;
 }
@@ -87,7 +89,9 @@ export class SkyScene extends Phaser.Scene {
   #options: SkyOptions;
   #art: Art;
   #ready = false;
-  #pending: { sessions: BoardSession[]; systems: string[] } | null = null;
+  #pending: { sessions: BoardSession[]; systems: string[]; labels: Record<string, string> } | null = null;
+  /** Projects I removed, taken off the island once the hub confirms they're gone. */
+  #forget = new Set<string>();
   #order: string[] = [];
   #templates = new Map<string, Template>();
   #sections: Section[] = [];
@@ -115,9 +119,15 @@ export class SkyScene extends Phaser.Scene {
 
   // -- the page's side --
 
-  /** The latest sessions and the projects in the order they first appeared. Safe to call before the scene starts. */
-  sync(sessions: BoardSession[], systems: string[]): void {
-    this.#pending = { sessions, systems };
+  /** The latest sessions, the projects in the order they first appeared, and my names for them. Safe to call before the scene starts. */
+  sync(sessions: BoardSession[], systems: string[], labels: Record<string, string> = {}): void {
+    this.#pending = { sessions, systems, labels };
+    if (this.#ready) this.#apply();
+  }
+
+  /** Takes a removed project off the island; the other sections close up behind it. */
+  forget(name: string): void {
+    this.#forget.add(name);
     if (this.#ready) this.#apply();
   }
 
@@ -238,13 +248,31 @@ export class SkyScene extends Phaser.Scene {
   #apply(): void {
     const data = this.#pending;
     if (!data) return;
-    const before = this.#order.length;
-    for (const name of [...data.systems, ...data.sessions.map((s) => s.system)]) {
-      if (!this.#order.includes(name)) this.#order.push(name);
+    const listed = new Set([...data.systems, ...data.sessions.map((s) => s.system)]);
+    const dropped = [...this.#forget].filter((name) => !listed.has(name));
+    if (dropped.length) {
+      // Removing a section moves the ones after it, so the island is laid out again.
+      this.#clear();
+      this.#order = this.#order.filter((name) => !dropped.includes(name));
+      for (const name of dropped) this.#forget.delete(name);
+      if (!this.#order.length) this.#buildGround(false); // nothing left: clear the ground too
     }
+    const before = this.#sections.length;
+    for (const name of listed) if (!this.#order.includes(name)) this.#order.push(name);
     if (this.#order.length !== before) this.#grow(before);
+    for (const sec of this.#sections) sec.label.setText((data.labels[sec.name] ?? sec.name).toUpperCase());
     this.#syncMirlings(data.sessions);
     this.#refreshSummaries();
+  }
+
+  #clear(): void {
+    for (const col of [...this.#mirlings.values()]) this.#retire(col, true);
+    for (const sec of this.#sections) {
+      for (const b of sec.buildings) b.img.destroy();
+      sec.label.destroy();
+      sec.summary.destroy();
+    }
+    this.#sections = [];
   }
 
   // New projects add sections at the edge; the ground is redrawn, while existing buildings and mirlings stay put.
@@ -312,7 +340,8 @@ export class SkyScene extends Phaser.Scene {
       if (deco) this.#ground.push(deco);
       if (animate && !known.has(`${cell.c},${cell.r}`)) fresh.push(tile, ...(deco ? [deco] : []));
     });
-    this.#ground.push(this.#underside());
+    const under = this.#underside();
+    if (under) this.#ground.push(under);
     if (animate && !reduceMotion) {
       for (const obj of fresh) {
         const y = obj.y;
@@ -322,7 +351,7 @@ export class SkyScene extends Phaser.Scene {
     }
   }
 
-  #underside(): Image {
+  #underside(): Image | null {
     const { w, h, side } = this.#art.tile;
     const columns = new Map<number, number>();
     for (const cell of this.#cells.values()) {
@@ -334,6 +363,7 @@ export class SkyScene extends Phaser.Scene {
         if (!columns.has(wx) || (columns.get(wx) as number) < wy) columns.set(wx, Math.round(wy));
       }
     }
+    if (!columns.size) return null;
     const key = `underside.${this.#order.length}`;
     this.#art.underside(this, columns, key);
     return this.add.image(Math.min(...columns.keys()), Math.min(...columns.values()), key).setOrigin(0, 0).setDepth(-200000);
@@ -364,6 +394,7 @@ export class SkyScene extends Phaser.Scene {
     sec.anchor = { x: corner.x, y: corner.y - this.#art.tile.h / 2 - 2 * A };
     sec.summary = this.#label('', { fontFamily: '"IBM Plex Mono", monospace', fontSize: '11px', color: '#c9c8dc', backgroundColor: '#0b0d1acc', padding: { x: 5, y: 2 } });
     sec.label = this.#label(name.toUpperCase(), { fontFamily: '"Pixelify Sans", monospace', fontSize: '14px', color: ACCENT_COLOUR[accent], backgroundColor: '#0b0d1acc', padding: { x: 5, y: 2 } });
+    for (const text of [sec.label, sec.summary]) text.setInteractive({ useHandCursor: true }).setData('section', name);
     this.#sections.push(sec);
   }
 
@@ -712,7 +743,9 @@ export class SkyScene extends Phaser.Scene {
     this.input.on('pointerup', (_p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
       if (this.#drag && !this.#drag.moved) {
         const id = over.map((o) => o.getData('session') as string | undefined).find(Boolean);
+        const section = over.map((o) => o.getData('section') as string | undefined).find(Boolean);
         if (id) this.#options.onSelect(id);
+        else if (section) this.#options.onSection?.(section);
       }
       this.#drag = null;
     });

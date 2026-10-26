@@ -45,7 +45,8 @@ interface Session extends Omit<SessionView, 'subagents'> {
 }
 
 const ENDED_TURNS_KEPT = 50;
-const ENDED_VISIBLE_MS = 60 * 60 * 1000;
+// Long enough to see that a session ended, short enough not to linger (decision 30).
+const ENDED_VISIBLE_MS = 5 * 60 * 1000;
 
 export class Roster {
   #sessions = new Map<string, Session>();
@@ -102,7 +103,7 @@ export class Roster {
     }
   }
 
-  /** Sessions worth showing: everything still running, plus sessions that ended within the last hour. */
+  /** Sessions worth showing: everything still running, plus sessions that ended in the last five minutes. */
   snapshot(now = Date.now()): SessionView[] {
     return [...this.#sessions.values()]
       .filter((s) => s.status !== 'ended' || now - Date.parse(s.lastAt) < ENDED_VISIBLE_MS)

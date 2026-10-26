@@ -68,6 +68,11 @@ describe('Claude Code source', () => {
     assert.equal(source.continueAt?.({ ...session(transcript), id }), null); // no folder known
   });
 
+  it('starts a new chat in the extension, with the prompt carried in the link', () => {
+    assert.deepEqual(source.startAt?.('C:\\code\\mira'), { link: 'vscode://anthropic.claude-code/open' });
+    assert.deepEqual(source.startAt?.('C:\\code\\mira', 'Fix #12 & ship'), { link: 'vscode://anthropic.claude-code/open?prompt=Fix%20%2312%20%26%20ship' });
+  });
+
   it('makes valid, repeatable UUIDs', () => {
     assert.equal(stableId('usage:s-1:p-1'), stableId('usage:s-1:p-1'));
     assert.notEqual(stableId('usage:s-1:p-1'), stableId('usage:s-1:p-2'));

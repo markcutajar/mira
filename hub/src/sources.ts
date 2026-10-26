@@ -85,6 +85,8 @@ export interface SourceAdapter {
   story?(session: SessionView, options: { helper?: string; turns: number }): Story | null;
   /** Where to carry a session on in an editor: its folder, and a link that opens the session there. */
   continueAt?(session: SessionView): { folder: string; link: string } | null;
+  /** A link that starts a new session in a project folder, with a prompt typed in for me to send (decision 29). */
+  startAt?(folder: string, prompt?: string): { link: string } | null;
 }
 
 export const emptyUsage = (): UsageTotals => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 });

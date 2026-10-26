@@ -12,6 +12,8 @@ export const STATUS_LABEL: Record<string, string> = { 'needs-me': 'Needs you', f
 export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
 export const folder = (path?: string) => (path ? path.split(/[\\/]/).filter(Boolean).pop() ?? '' : '');
 export const short = (id: string) => String(id).slice(0, 8);
+/** My name for a project, or its own. */
+export const projectLabel = (system: string, systems: Array<{ name: string; label?: string }>) => systems.find((s) => s.name === system)?.label ?? system;
 export const sessionLabel = (s: BoardSession) => s.title || `${folder(s.cwd) || s.system} · ${short(s.id)}`;
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 export const clock = (iso: string) => new Date(iso).toTimeString().slice(0, 8);

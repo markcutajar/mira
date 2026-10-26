@@ -109,6 +109,12 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
       if (!session.cwd || !SESSION_ID.test(session.id)) return null;
       return { folder: session.cwd, link: `vscode://anthropic.claude-code/open?session=${session.id}` };
     },
+
+    // Without a session, the same link opens a new chat; the extension types the prompt into its
+    // input box and leaves sending it to me.
+    startAt(_folder, prompt) {
+      return { link: `vscode://anthropic.claude-code/open${prompt ? `?prompt=${encodeURIComponent(prompt)}` : ''}` };
+    },
   };
 }
 

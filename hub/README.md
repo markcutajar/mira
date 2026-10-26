@@ -10,9 +10,13 @@ npm start        # or: npm run dev, which restarts when the code changes
 
 Then open `http://127.0.0.1:4711` for the status board: sessions grouped by project with their live status and estimated cost, the event stream, and prompts waiting for an answer. While the board is open and on screen with "Answer prompts here" ticked, permission prompts wait there for up to 60 seconds before the terminal asks.
 
+"+ New session" on a project opens a new Claude Code chat in its VS Code window, with a prompt you type in Mira already in the box; you send it from VS Code (decision 29).
+
+Each project has Rename and Remove, and each session row has Remove. Your names and removals are kept in `mira.db`; a removed project or session comes back once something happens in it again, and ended sessions leave on their own after five minutes (decision 30).
+
 Click a session's title to open its story: every turn with its prompt, replies and tool calls, the subagents it started, and tokens and estimated cost for each turn and the whole session. Replies are rendered from Markdown by [web/markdown.js](web/markdown.js), which escapes all text first, so HTML in a reply shows as text; links open only for http(s), and links to repo files show as their names. The latest turn starts unfolded and the panel follows the session live. "Continue in VS Code" at the top opens the conversation in Claude Code's chat panel, in the VS Code window whose workspace holds the session's folder, or in a new window on that folder. A link to the board with `#session=<id>` opens that session's story. Titles and stories are read from the transcripts when needed, and never stored.
 
-Open `http://127.0.0.1:4711/sky` for the sky: the island with a hedged section per project, in the order projects first appeared, and a mirling per session (decision 28). Mirlings work at the library (reading tools) or workshop (everything else), raise a beacon when they need you, wait by their house with a speech bubble when it's your turn, smoke when they fail, and go home when they end. Helpers follow them while subagents run. Click a mirling for its story; "Needs you" flies to the next one waiting. Drag to move, scroll or use the buttons to zoom.
+Open `http://127.0.0.1:4711/sky` for the sky: the island with a hedged section per project, in the order projects first appeared, and a mirling per session (decision 28). Mirlings work at the library (reading tools) or workshop (everything else), raise a beacon when they need you, wait by their house with a speech bubble when it's your turn, smoke when they fail, and go home when they end. Helpers follow them while subagents run. Click a mirling for its story, or a project's name for its card: its sessions and their status, "+ New session", Rename and Remove; "Needs you" flies to the next one waiting. Drag to move, scroll or use the buttons to zoom.
 
 On startup it rebuilds today's picture from stored events, reads recent Claude Code transcripts to find sessions that ran while it was stopped, and stores the token counts of turns that ended in the last day. Everything it keeps is in `~/.mira`:
 
@@ -37,7 +41,7 @@ On startup it rebuilds today's picture from stored events, reads recent Claude C
 }
 ```
 
-- `systems` renames or groups sections. Keys are repo folder names; giving two folders the same name puts them in one section. Git worktrees join their main repo's section on their own, labelled with the worktree's folder name, so they need no entry here.
+- `systems` renames or groups sections by folder, before anything reaches the store; Rename on the board or in the sky only changes the name shown (decision 30). Keys are repo folder names; giving two folders the same name puts them in one section. Git worktrees join their main repo's section on their own, labelled with the worktree's folder name, so they need no entry here.
 - `permissionWaitSeconds` is how long a prompt waits for Mira while Mira is open. Keep it below the `PermissionRequest` hook's timeout, which is 65 seconds.
 - `activeHours` is how recent a transcript must be for its session to count as running at startup.
 - `prices` overrides or adds model prices for cost estimates, in US dollars per million tokens. Cache writes default to 1.25 times input for five minutes and twice input for an hour; set `cacheWrite5m` or `cacheWrite1h` to change them. The built-in table, in [src/pricing.ts](src/pricing.ts), holds Anthropic's first-party API prices as of October 2026. On a subscription these are only a measure of use, not a bill.
@@ -63,13 +67,17 @@ The `PreToolUse` entry is repeated for `SessionStart`, `UserPromptSubmit`, `Stop
 | `GET /` | The status board |
 | `GET /sky` | The sky |
 | `GET /shared/…`, `/sky/…` | The browser modules (TypeScript, sent with types stripped) and styles, plus `/markdown.js` and `/vendor/phaser.js` |
-| `GET /api/systems` | Projects active in the last 14 days, in the order each first appeared |
+| `GET /api/systems` | Projects active in the last 14 days, in the order each first appeared, with my name for each if I gave one |
+| `PUT /api/names/system/:name`, `/api/names/session/:id` | `{ "name" }`: my name for a project or session, up to 80 characters; empty goes back to its own |
+| `POST /api/remove/system/:name`, `/api/remove/session/:id` | Removes a project (with its sessions) or a session from view until something happens in it again |
 | `POST /ingest/<source>` | Events from a source, for example `/ingest/claude-code` for the hook commands |
 | `POST /hooks/permission` | Claude Code permission prompts, held for an answer while Mira is open |
 | `GET /api/sessions` | Live sessions and prompts waiting for an answer |
 | `GET /api/sessions/:id/story` | A session's story, read on demand. `?turns=30` sets how many recent turns; `?helper=<agent id>` tells one subagent's story instead. |
 | `GET /api/sessions/:id/editor` | The VS Code window to continue a session in: `{ link, name }`, where `link` brings that window forward |
 | `POST /api/sessions/:id/editor` | Opens the session in that window's Claude Code chat, a moment later |
+| `GET /api/systems/:name/start` | The project's folder and its VS Code window: `{ link, name, folder }` |
+| `POST /api/systems/:name/start` | `{ "prompt" }`: opens a new Claude Code chat in that window, a moment later, with the prompt typed in. Up to 1,500 characters. |
 | `GET /api/events?limit=100` | The most recent events |
 | `GET /api/stream` | Live updates as Server-Sent Events. Add `?visible=0` for a viewer that isn't on screen. |
 | `POST /api/presence` | `{ "viewer", "visible" }`: whether a viewer is on screen |
@@ -90,6 +98,6 @@ Each source is an adapter (decision 22), defined in [src/sources.ts](src/sources
 - It listens on `127.0.0.1` only. It refuses requests that carry another site's `Origin`, a browser's mark that they came from another site (`Sec-Fetch-Site`), or a different `Host`, so a web page can't inject events, answer a prompt or read a story.
 - It stores events, never content: no prompts, tool input or output, or messages. The command a permission prompt shows is held in memory while it waits, and never stored.
 - Stories are read from transcripts when asked for, and only from files under `~/.claude/projects`, whatever path a hook payload names.
-- The only thing the hub opens on the desktop is a session's Claude Code link, for a session it already knows, with an ID that must be a UUID. Which workspace holds which folder is read from VS Code's record of its open windows (`Code/User/globalStorage/storage.json`) and the workspace files it names, and never written.
+- The only things the hub opens on the desktop are Claude Code's own links: a session it already knows, by an ID that must be a UUID, or a new chat in a project folder it found from its own records, with my prompt typed in but not sent (decision 29). Which workspace holds which folder is read from VS Code's record of its open windows (`Code/User/globalStorage/storage.json`) and the workspace files it names, and never written.
 
 **Continuing in VS Code, the first time.** The browser asks whether the board may open VS Code; tick "Always allow". VS Code then asks whether to open the workspace from an outside link; tick "Allow opening local paths without asking". Until both are ticked, the conversation may open in whichever VS Code window was used last; clicking again puts it right.

@@ -7,11 +7,11 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { CONTRACT_VERSION, MiraEvent } from '../../contracts/src/index.ts';
-import type { Editor } from './editor.ts';
+import type { Editor, EditorTarget } from './editor.ts';
 import { Permissions, summarise, type Decision } from './permissions.ts';
 import type { Roster } from './roster.ts';
 import type { SourceAdapter } from './sources.ts';
-import type { Store } from './store.ts';
+import type { Kind, Store } from './store.ts';
 import type { Place } from './systems.ts';
 import { serveWeb, webFile } from './web.ts';
 
@@ -38,6 +38,8 @@ interface Viewer {
 const MAX_BODY = 16 * 1024 * 1024;
 const STORY_TURNS = 30;
 const EDITOR_DELAY_MS = 1500;
+// Links go through the operating system, which may cut long ones short.
+const MAX_PROMPT = 1500;
 const CLOCK_SKEW_MS = 10 * 60 * 1000;
 const HEARTBEAT_MS = 25 * 1000;
 const SYSTEMS_DAYS = 14;
@@ -59,7 +61,19 @@ export function createHub(options: HubOptions) {
     for (const viewer of viewers.values()) viewer.res.write(message);
   }
 
-  const sessions = () => roster.snapshot().map((s) => ({ ...s, title: sources.get(s.source)?.title?.(s), worktree: options.placeFor(s.cwd).worktree }));
+  // My own names, and what I removed from view (decision 30), kept in memory and written through.
+  const names: Record<Kind, Record<string, string>> = { system: store.names('system'), session: store.names('session') };
+  const removed: Record<Kind, Record<string, string>> = { system: store.removed('system'), session: store.removed('session') };
+  // Removed stays removed until something happens after it.
+  const gone = (kind: Kind, key: string, lastAt: string) => (removed[kind][key] ?? '') >= lastAt;
+
+  const sessions = () => roster.snapshot()
+    .filter((s) => !gone('session', s.id, s.lastAt) && !gone('system', s.system, s.lastAt))
+    .map((s) => ({ ...s, title: names.session[s.id] ?? sources.get(s.source)?.title?.(s), worktree: options.placeFor(s.cwd).worktree }));
+
+  const systems = () => store.systems(new Date(Date.now() - SYSTEMS_DAYS * 86_400_000).toISOString())
+    .filter((s) => s.name !== 'unknown' && !gone('system', s.name, s.lastAt))
+    .map((s) => (names.system[s.name] ? { ...s, label: names.system[s.name] } : s));
 
   function record(event: MiraEvent | null) {
     if (!event || !store.add(event)) return;
@@ -110,7 +124,7 @@ export function createHub(options: HubOptions) {
   function stream(req: IncomingMessage, res: ServerResponse, url: URL) {
     const id = randomUUID();
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    res.write(sse('hello', { viewer: id, waitSeconds: options.permissionWaitMs / 1000 }) + sse('sessions', sessions()) + sse('pending', permissions.pending()));
+    res.write(sse('hello', { viewer: id, waitSeconds: options.permissionWaitMs / 1000 }) + sse('systems', systems()) + sse('sessions', sessions()) + sse('pending', permissions.pending()));
     viewers.set(id, { res, visible: url.searchParams.get('visible') !== '0' });
     req.on('close', () => viewers.delete(id));
   }
@@ -158,6 +172,55 @@ export function createHub(options: HubOptions) {
     res.writeHead(204).end();
   }
 
+  // A project's own folder: the root of its most recent live session, else of the folders its
+  // stored events name, as long as it still exists and the editor can find a window for it.
+  function projectFolder(system: string): { folder: string; target: EditorTarget } | undefined {
+    const live = roster.snapshot().filter((s) => s.system === system && s.cwd).sort((a, b) => b.lastAt.localeCompare(a.lastAt)).map((s) => s.cwd as string);
+    for (const cwd of new Set([...live, ...store.folders(system)])) {
+      const place = options.placeFor(cwd);
+      const target = place.system === system && place.root ? options.editor?.target(place.root) : undefined;
+      if (place.root && target) return { folder: place.root, target };
+    }
+    return undefined;
+  }
+
+  // Starting a new session works like carrying one on: GET names the window, for the page's link,
+  // and POST then opens a new chat there with my prompt typed in, never sent (decision 29).
+  async function startIn(req: IncomingMessage, res: ServerResponse, system: string) {
+    const starter = options.sources.find((s) => s.startAt);
+    const found = starter ? projectFolder(system) : undefined;
+    if (!starter || !found) return reply(res, 404, `Mira doesn't know a folder for ${system} yet.`);
+    if (req.method === 'GET') return json(res, { ...found.target, folder: found.folder });
+    const body = parseObject(await readBody(req)) ?? {};
+    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+    if (prompt.length > MAX_PROMPT) return reply(res, 400, `A prompt opened from Mira can be up to ${MAX_PROMPT} characters.`);
+    const at = starter.startAt?.(found.folder, prompt || undefined);
+    if (!at) return reply(res, 404, `Mira can't start a session in ${system}.`);
+    setTimeout(() => options.editor?.open(at.link), options.editorDelayMs ?? EDITOR_DELAY_MS).unref();
+    res.writeHead(204).end();
+  }
+
+  // PUT /api/names/<kind>/<key> { name } renames; POST /api/remove/<kind>/<key> removes from view.
+  async function change(req: IncomingMessage, res: ServerResponse, action: 'names' | 'remove', kind: Kind, key: string) {
+    if (action === 'names') {
+      if (req.method !== 'PUT') return reply(res, 405, 'Rename with PUT.');
+      const body = parseObject(await readBody(req));
+      const name = typeof body?.name === 'string' ? body.name.trim() : null;
+      if (name === null || name.length > 80) return reply(res, 400, 'Expected { name }, up to 80 characters; an empty name goes back to the original.');
+      store.setName(kind, key, name);
+      if (name) names[kind][key] = name;
+      else delete names[kind][key];
+    } else {
+      if (req.method !== 'POST') return reply(res, 405, 'Remove with POST.');
+      const at = new Date().toISOString();
+      store.remove(kind, key, at);
+      removed[kind][key] = at;
+    }
+    res.writeHead(204).end();
+    broadcast('systems', systems());
+    broadcast('sessions', sessions());
+  }
+
   const server = createServer((req, res) => {
     const port = (server.address() as AddressInfo).port;
     if (!fromThisMachine(req, port)) return reply(res, 403, 'Mira only accepts requests from this machine.');
@@ -167,22 +230,32 @@ export function createHub(options: HubOptions) {
     const ingestFor = req.method === 'POST' ? sources.get(url.pathname.match(/^\/ingest\/([a-z0-9-]+)$/)?.[1] ?? '') : undefined;
     const storyOf = req.method === 'GET' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/story$/)?.[1] : undefined;
     const editorOf = req.method === 'GET' || req.method === 'POST' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/editor$/)?.[1] : undefined;
+    const manage = req.method === 'PUT' || req.method === 'POST' ? url.pathname.match(/^\/api\/(names|remove)\/(system|session)\/([^/]{1,240})$/) : null;
+    const startOf = req.method === 'GET' || req.method === 'POST' ? url.pathname.match(/^\/api\/systems\/([^/]{1,240})\/start$/)?.[1] : undefined;
     if (ingestFor?.ingest) return void ingest(req, res, ingestFor);
     if (route === 'POST /hooks/permission') return void permission(req, res);
     if (route === 'GET /api/sessions') return json(res, { sessions: sessions(), pending: permissions.pending(), waitSeconds: options.permissionWaitMs / 1000 });
     if (route === 'GET /api/events') return json(res, store.recent(clamp(Number(url.searchParams.get('limit') ?? 100), 1, 500)));
     if (storyOf) return story(res, storyOf, url);
     if (editorOf) return editor(req, res, editorOf);
+    if (startOf) return void startIn(req, res, decodeName(startOf));
     if (route === 'GET /api/stream') return stream(req, res, url);
     if (route === 'POST /api/presence') return void presence(req, res);
     if (req.method === 'POST' && prompt?.[1]) return void answer(req, res, prompt[1]);
-    if (route === 'GET /api/systems') return json(res, { systems: store.systems(new Date(Date.now() - SYSTEMS_DAYS * 86_400_000).toISOString()).filter((s) => s.name !== 'unknown') });
+    if (route === 'GET /api/systems') return json(res, { systems: systems() });
+    if (manage) return void change(req, res, manage[1] as 'names' | 'remove', manage[2] as Kind, decodeName(manage[3] as string));
     const served = req.method === 'GET' ? webFile(url.pathname) : undefined;
     if (served) return void serveWeb(res, served);
     reply(res, 404, 'Not found.');
   });
 
+  // The heartbeat also notices sessions that left the view with no event to say so, such as ended
+  // ones once their few minutes are up.
+  let shown = '';
   const heartbeat = setInterval(() => {
+    const now = JSON.stringify(sessions());
+    if (shown && now !== shown) broadcast('sessions', JSON.parse(now));
+    shown = now;
     for (const viewer of viewers.values()) viewer.res.write(': ping\n\n');
   }, HEARTBEAT_MS);
   heartbeat.unref();
@@ -246,6 +319,14 @@ function parseObject(body: Buffer | null): Record<string, unknown> | null {
 
 const sse = (type: string, data: unknown) => `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
 const clamp = (n: number, min: number, max: number) => (Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : max);
+
+function decodeName(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
 
 function json(res: ServerResponse, data: unknown) {
   res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(data));

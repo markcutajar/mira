@@ -16,6 +16,7 @@ const claude: SourceAdapter = {
   title: (s) => (s.transcript ? 'Hub work' : undefined),
   story: (s, { helper }) => (s.transcript ? { sessionId: s.id, helperId: helper, usage: emptyUsage(), turns: [], earlier: 0 } : null),
   continueAt: (s) => (s.cwd ? { folder: s.cwd, link: `vscode://claude/open?session=${s.id}` } : null),
+  startAt: (_folder, prompt) => ({ link: `vscode://claude/open?prompt=${prompt ?? ''}` }),
   followUp: (event, emit) => {
     if (event.type !== 'turn.ended') return;
     const { status, ...rest } = event;
@@ -27,7 +28,7 @@ const opened: string[] = [];
 const editor = { target: (folder: string) => ({ link: `vscode://file/${folder}`, name: 'mira (Workspace)' }), open: (link: string) => void opened.push(link) };
 const store = new Store(':memory:');
 const roster = new Roster();
-const hub = createHub({ store, roster, sources: [claude], placeFor: () => ({ system: 'mira' }), permissionWaitMs: 5000, editor, editorDelayMs: 0 });
+const hub = createHub({ store, roster, sources: [claude], placeFor: (cwd) => ({ system: 'mira', root: cwd }), permissionWaitMs: 5000, editor, editorDelayMs: 0 });
 let base = '';
 
 const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -136,6 +137,16 @@ describe('hub server', () => {
     assert.equal((await fetch(`${base}/api/sessions/nobody/editor`)).status, 404);
   });
 
+  it('starts a new session in a project, with the prompt typed in for me', async () => {
+    const target = await (await fetch(`${base}/api/systems/mira/start`)).json();
+    assert.deepEqual(target, { link: 'vscode://file/C:\\code\\mira', name: 'mira (Workspace)', folder: 'C:\\code\\mira' });
+    assert.equal((await post('/api/systems/mira/start', { prompt: '  Fix the login loop  ' })).status, 204);
+    await new Promise((done) => setTimeout(done, 20));
+    assert.equal(opened.at(-1), 'vscode://claude/open?prompt=Fix the login loop');
+    assert.equal((await post('/api/systems/mira/start', { prompt: 'x'.repeat(1501) })).status, 400);
+    assert.equal((await fetch(`${base}/api/systems/${encodeURIComponent('not here')}/start`)).status, 404);
+  });
+
   it('records what a source reports after an event, such as token use', async () => {
     await post('/ingest/claude-code', { hook_event_name: 'Stop', session_id: 's-6', cwd: 'C:\\code\\mira', prompt_id: 'p-1' });
     assert.deepEqual((await sessions()).sessions.find((s) => s.id === 's-6')?.usage, { tokens: 30, costUsd: 0.5 });
@@ -169,5 +180,34 @@ describe('hub server', () => {
   it('lists projects in the order they first appeared', async () => {
     const { systems } = (await (await fetch(`${base}/api/systems`)).json()) as { systems: Array<{ name: string }> };
     assert.deepEqual(systems.map((s) => s.name), ['mira']);
+  });
+
+  it('renames projects and sessions, and goes back to their own names', async () => {
+    const put = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal((await put('/api/names/system/mira', { name: ' Mira ' })).status, 204);
+    assert.equal((await put('/api/names/session/s-5', { name: 'The hub' })).status, 204);
+    const { systems } = (await (await fetch(`${base}/api/systems`)).json()) as { systems: Array<{ name: string; label?: string }> };
+    assert.deepEqual(systems.map((s) => [s.name, s.label]), [['mira', 'Mira']]);
+    assert.equal((await sessions()).sessions.find((s) => s.id === 's-5')?.title, 'The hub');
+    assert.equal((await put('/api/names/session/s-5', { name: '' })).status, 204);
+    assert.equal((await sessions()).sessions.find((s) => s.id === 's-5')?.title, 'Hub work');
+    assert.equal((await put('/api/names/system/mira', { name: 'x'.repeat(81) })).status, 400);
+    assert.equal((await post('/api/names/system/mira', { name: 'Mira' })).status, 405);
+  });
+
+  it('removes a session until something happens in it again', async () => {
+    assert.equal((await post('/api/remove/session/s-5', {})).status, 204);
+    assert.equal((await sessions()).sessions.some((s) => s.id === 's-5'), false);
+    await new Promise((done) => setTimeout(done, 5));
+    await post('/ingest/claude-code', { hook_event_name: 'UserPromptSubmit', session_id: 's-5', cwd: 'C:\\code\\mira' });
+    assert.equal((await sessions()).sessions.some((s) => s.id === 's-5'), true);
+  });
+
+  // Last, since it takes every test session off the board with it.
+  it('removes a project with its sessions', async () => {
+    assert.equal((await post('/api/remove/system/mira', {})).status, 204);
+    const { systems } = (await (await fetch(`${base}/api/systems`)).json()) as { systems: unknown[] };
+    assert.deepEqual(systems, []);
+    assert.deepEqual((await sessions()).sessions, []);
   });
 });

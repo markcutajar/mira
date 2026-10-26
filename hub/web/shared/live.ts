@@ -5,7 +5,16 @@
 import type { MiraEvent } from '../../../contracts/src/index.ts';
 import type { BoardSession, PendingPrompt } from './format.ts';
 
+/** A project, as the island lays it out: in the order it first appeared, with my name for it if I gave one. */
+export interface SystemInfo {
+  name: string;
+  firstAt: string;
+  lastAt: string;
+  label?: string;
+}
+
 export interface Live {
+  systems: SystemInfo[];
   sessions: BoardSession[];
   pending: PendingPrompt[];
   /** Newest first, at most 80. */
@@ -18,6 +27,7 @@ export interface LiveOptions {
   /** The "Answer prompts here" checkbox, remembered in this browser. */
   hold?: HTMLInputElement | null;
   onConnection?(): void;
+  onSystems?(): void;
   onSessions?(): void;
   onPending?(): void;
   /** A new event, as it happens. */
@@ -30,7 +40,7 @@ const HOLD_KEY = 'mira.answerHere';
 const EVENTS_KEPT = 80;
 
 export function connectLive(options: LiveOptions): Live {
-  const live: Live = { sessions: [], pending: [], events: [], waitSeconds: 60, connected: false };
+  const live: Live = { systems: [], sessions: [], pending: [], events: [], waitSeconds: 60, connected: false };
   let viewer: string | null = null;
   let hold = true;
   try { hold = localStorage.getItem(HOLD_KEY) !== 'off'; } catch { /* storage unavailable: default on */ }
@@ -61,6 +71,10 @@ export function connectLive(options: LiveOptions): Live {
     Object.assign(live, { waitSeconds: hello.waitSeconds, connected: true });
     presence();
     options.onConnection?.();
+  });
+  stream.addEventListener('systems', (e) => {
+    live.systems = JSON.parse((e as MessageEvent).data) as SystemInfo[];
+    options.onSystems?.();
   });
   stream.addEventListener('sessions', (e) => {
     live.sessions = JSON.parse((e as MessageEvent).data) as BoardSession[];

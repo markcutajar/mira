@@ -3,12 +3,15 @@
 
 import type { MiraEvent } from '../../../contracts/src/index.ts';
 import type { Story, StoryStep, StoryTurn, UsageTotals } from '../../src/sources.ts';
+import { removeThing, renameThing } from './manage.ts';
 import { answerPrompt, cost, esc, folder, plural, short, STATUS_LABEL, sessionLabel, toast, tokens, when, type BoardSession, type PendingPrompt } from './format.ts';
 
 export interface PanelOptions {
   session(id: string): BoardSession | undefined;
   pending(): PendingPrompt[];
   waitSeconds(): number;
+  /** My name for a project, if I gave one. */
+  projectLabel?(system: string): string;
   /** Called when a session opens or the panel closes, so the page can mark it. */
   onChange?(id: string | null): void;
 }
@@ -49,6 +52,8 @@ export function createPanel(options: PanelOptions): Panel {
       </div>
       <div class="panel-actions">
         <a class="go small" data-editor hidden>Continue in VS Code</a>
+        <button type="button" class="ghost small" data-rename>Rename</button>
+        <button type="button" class="ghost small" data-remove>Remove</button>
         <button type="button" class="ghost small" data-close aria-label="Close the story">Close</button>
       </div>
     </header>
@@ -151,8 +156,10 @@ export function createPanel(options: PanelOptions): Panel {
     const name = session ? sessionLabel(session) : short(state.id);
     title.textContent = state.helper ? state.helperName || 'Subagent' : name;
     $('sub').textContent = state.helper ? `Subagent of ${name}`
-      : session ? [...new Set([session.system, folder(session.cwd)])].concat(STATUS_LABEL[session.status ?? ''] ?? []).filter(Boolean).join(' · ') : '';
+      : session ? [...new Set([options.projectLabel?.(session.system) ?? session.system, folder(session.cwd)])].concat(STATUS_LABEL[session.status ?? ''] ?? []).filter(Boolean).join(' · ') : '';
     $('back').hidden = !state.helper;
+    $('rename').hidden = Boolean(state.helper) || !session;
+    $('remove').hidden = Boolean(state.helper) || !session;
     const editor = $('editor') as HTMLAnchorElement;
     editor.hidden = !state.editor;
     if (state.editor) {
@@ -278,6 +285,9 @@ export function createPanel(options: PanelOptions): Panel {
     const helper = target.closest('[data-helper]') as HTMLElement | null;
     if (helper?.dataset.helper) return openHelper(helper.dataset.helper, helper.dataset.helperName ?? '');
     if (target.closest('[data-close]')) return close();
+    const session = state.id ? options.session(state.id) : undefined;
+    if (session && target.closest('[data-rename]')) return void renameThing('session', session.id, sessionLabel(session));
+    if (session && target.closest('[data-remove]')) return void removeThing('session', session.id, sessionLabel(session)).then((done) => { if (done) close(); });
     if (target.closest('[data-editor]')) return continueInEditor();
     if (target.closest('[data-back]')) {
       reset();

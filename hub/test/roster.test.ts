@@ -99,10 +99,10 @@ describe('Roster', () => {
     assert.equal(session?.cwd, 'C:\\code\\mira');
   });
 
-  it('hides sessions an hour after they end', () => {
+  it('hides sessions five minutes after they end', () => {
     const roster = new Roster();
     roster.apply(ev('session.ended', 'ended', 0));
-    assert.equal(roster.snapshot(Date.parse('2026-10-25T18:30:00Z')).length, 1);
-    assert.equal(roster.snapshot(Date.parse('2026-10-25T19:30:00Z')).length, 0);
+    assert.equal(roster.snapshot(Date.parse('2026-10-25T18:04:00Z')).length, 1);
+    assert.equal(roster.snapshot(Date.parse('2026-10-25T18:06:00Z')).length, 0);
   });
 });
