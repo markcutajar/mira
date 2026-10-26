@@ -17,7 +17,7 @@
   --turn: #6fb6ff;
   --failed: #ff6b7a;
   --ended: #6b6e8f;
-  --font-display: "Pixelify Sans", ui-monospace, "Cascadia Mono", monospace;
+  --font-display: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace; /* the art is pixel art; the words are not */
   --font-body: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif;
   --font-data: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace;
 }

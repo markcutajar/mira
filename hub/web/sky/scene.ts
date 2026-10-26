@@ -457,7 +457,7 @@ export class SkyScene extends Phaser.Scene {
     const corner = this.#tileXY(c0, r0);
     sec.anchor = { x: corner.x, y: corner.y - this.#art.tile.h / 2 - 2 * A };
     sec.summary = this.#label('', { fontFamily: '"IBM Plex Mono", monospace', fontSize: '11px', color: '#c9c8dc', backgroundColor: '#0b0d1acc', padding: { x: 5, y: 2 } });
-    sec.label = this.#label(name.toUpperCase(), { fontFamily: '"Pixelify Sans", monospace', fontSize: '14px', color: ACCENT_COLOUR[accent], backgroundColor: '#0b0d1acc', padding: { x: 5, y: 2 } });
+    sec.label = this.#label(name.toUpperCase(), { fontFamily: '"IBM Plex Mono", monospace', fontStyle: '600', fontSize: '13px', color: ACCENT_COLOUR[accent], backgroundColor: '#0b0d1acc', padding: { x: 5, y: 2 } });
     for (const text of [sec.label, sec.summary]) text.setInteractive({ useHandCursor: true }).setData('section', name);
     this.#sections.push(sec);
   }
@@ -660,7 +660,7 @@ export class SkyScene extends Phaser.Scene {
   #floatAt(x: number, y: number, text: string, color = '#ffd34d'): void {
     if (reduceMotion) return;
     const A = this.#art.scale;
-    const label = this.add.text(x, y, text, { fontFamily: '"Pixelify Sans", monospace', fontSize: '12px', color, resolution: DPR() })
+    const label = this.add.text(x, y, text, { fontFamily: '"IBM Plex Mono", monospace', fontSize: '12px', color, resolution: DPR() })
       .setOrigin(0.5, 1).setDepth(600001).setScale(DPR() / this.cameras.main.zoom);
     label.texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
     this.tweens.add({ targets: label, y: label.y - 14 * A, alpha: 0, duration: 1600, onComplete: () => label.destroy() });

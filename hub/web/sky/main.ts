@@ -137,7 +137,7 @@ if (!('Phaser' in window)) {
 } else {
   // Canvas text needs the fonts in place before the first label is drawn.
   await Promise.race([
-    Promise.all([document.fonts.load('14px "Pixelify Sans"'), document.fonts.load('11px "IBM Plex Mono"'), document.fonts.load('12px "IBM Plex Sans"')]),
+    Promise.all([document.fonts.load('600 13px "IBM Plex Mono"'), document.fonts.load('11px "IBM Plex Mono"'), document.fonts.load('12px "IBM Plex Sans"')]),
     new Promise((done) => setTimeout(done, 1500)),
   ]).catch(() => {});
   const d = DPR();
