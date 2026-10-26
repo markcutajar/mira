@@ -8,6 +8,7 @@ import { Roster } from '../src/roster.ts';
 import { createHub } from '../src/server.ts';
 import { emptyUsage, type SourceAdapter } from '../src/sources.ts';
 import { Store } from '../src/store.ts';
+import { WebSocket } from 'ws';
 
 // A stand-in for Claude Code, so these tests cover the hub and not transcript reading.
 const claude: SourceAdapter = {
@@ -16,6 +17,8 @@ const claude: SourceAdapter = {
   title: (s) => (s.transcript ? 'Hub work' : undefined),
   story: (s, { helper }) => (s.transcript ? { sessionId: s.id, helperId: helper, usage: emptyUsage(), turns: [], earlier: 0 } : null),
   continueAt: (s) => (s.cwd ? { folder: s.cwd, link: `vscode://claude/open?session=${s.id}` } : null),
+  // A harmless program stands in for `claude --resume`.
+  terminalFor: (s) => (s.cwd ? { file: process.execPath, args: ['-e', "process.stdout.write('hello from mira')"], cwd: process.cwd(), title: 'hello' } : null),
   startAt: (_folder, prompt) => ({ link: `vscode://claude/open?prompt=${prompt ?? ''}` }),
   followUp: (event, emit) => {
     if (event.type !== 'turn.ended') return;
@@ -135,6 +138,29 @@ describe('hub server', () => {
     await new Promise((done) => setTimeout(done, 20));
     assert.deepEqual(opened, ['vscode://claude/open?session=s-5']);
     assert.equal((await fetch(`${base}/api/sessions/nobody/editor`)).status, 404);
+  });
+
+  it('runs a terminal for a session and streams it to the page, but to no other site', async () => {
+    assert.deepEqual(await (await fetch(`${base}/api/sessions/s-5/terminal`)).json(), { available: true, running: false });
+    const address = `${base.replace('http', 'ws')}/api/sessions/s-5/terminal?cols=80&rows=24`;
+    const page = new WebSocket(address, { headers: { Origin: base } });
+    const seen: Array<{ type: string; data?: string; running?: boolean; exitCode?: number | null }> = [];
+    const ended = new Promise<void>((done) => page.on('message', (raw) => {
+      const message = JSON.parse(String(raw)) as (typeof seen)[number];
+      seen.push(message);
+      if (message.type === 'state' && message.running === false && message.exitCode === 0) done();
+    }));
+    await new Promise((done) => page.on('open', done));
+    page.send(JSON.stringify({ type: 'start' }));
+    await ended;
+    assert.match(seen.filter((m) => m.type === 'output').map((m) => m.data).join(''), /hello from mira/);
+    page.close();
+    const stranger = new WebSocket(address, { headers: { Origin: 'https://evil.example' } });
+    const refused = await new Promise((done) => {
+      stranger.on('unexpected-response', (_req, res) => done(res.statusCode));
+      stranger.on('error', () => done('error'));
+    });
+    assert.equal(refused, 403);
   });
 
   it('starts a new session in a project, with the prompt typed in for me', async () => {

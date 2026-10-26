@@ -73,6 +73,15 @@ describe('Claude Code source', () => {
     assert.deepEqual(source.startAt?.('C:\\code\\mira', 'Fix #12 & ship'), { link: 'vscode://anthropic.claude-code/open?prompt=Fix%20%2312%20%26%20ship' });
   });
 
+  it('resumes a session in a terminal with claude --resume, in its folder', () => {
+    const id = '673391f2-21ec-4c16-b57b-8dadae724ac0';
+    const spec = source.terminalFor?.({ ...session(transcript), id, cwd: 'C:\code\mira' });
+    assert.equal(spec?.cwd, 'C:\code\mira');
+    assert.deepEqual(spec?.args.slice(-2), ['--resume', id]);
+    assert.equal(spec?.title, 'claude --resume 673391f2');
+    assert.equal(source.terminalFor?.({ ...session(transcript), id: 's-1 && del', cwd: 'C:\code\mira' }), null);
+  });
+
   it('makes valid, repeatable UUIDs', () => {
     assert.equal(stableId('usage:s-1:p-1'), stableId('usage:s-1:p-1'));
     assert.notEqual(stableId('usage:s-1:p-1'), stableId('usage:s-1:p-2'));

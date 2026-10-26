@@ -3,7 +3,9 @@
 
 import type { MiraEvent } from '../../../contracts/src/index.ts';
 import type { Story, StoryStep, StoryTurn, UsageTotals } from '../../src/sources.ts';
+import { showDialog } from './dialog.ts';
 import { removeThing, renameThing } from './manage.ts';
+import { openTerminal, type TerminalState, type TerminalView } from './terminal.ts';
 import { answerPrompt, cost, esc, folder, plural, short, STATUS_LABEL, sessionLabel, toast, tokens, when, type BoardSession, type PendingPrompt } from './format.ts';
 
 export interface PanelOptions {
@@ -52,6 +54,7 @@ export function createPanel(options: PanelOptions): Panel {
       </div>
       <div class="panel-actions">
         <a class="go small" data-editor hidden>Continue in VS Code</a>
+        <button type="button" class="ghost small" data-terminal hidden>Terminal</button>
         <button type="button" class="ghost small" data-rename>Rename</button>
         <button type="button" class="ghost small" data-remove>Remove</button>
         <button type="button" class="ghost small" data-close aria-label="Close the story">Close</button>
@@ -59,7 +62,11 @@ export function createPanel(options: PanelOptions): Panel {
     </header>
     <div data-prompt></div>
     <div class="totals" data-totals></div>
-    <div class="turns" data-turns></div>`;
+    <div class="turns" data-turns></div>
+    <div class="term-view" data-term hidden>
+      <div class="term-bar"><span class="term-state" data-term-state></span><button type="button" class="go small" data-term-start hidden>Resume here</button><button type="button" class="stop small" data-term-stop hidden>Stop</button></div>
+      <div class="term-host" data-term-host></div>
+    </div>`;
   document.body.append(root);
   const $ = (name: string) => root.querySelector(`[data-${name}]`) as HTMLElement;
   const title = root.querySelector('#panel-title') as HTMLElement;
@@ -76,6 +83,10 @@ export function createPanel(options: PanelOptions): Panel {
     timer: 0,
     editor: null as EditorTarget | null,
     busy: new Set<string>(),
+    // The terminal (decision 36): whether the session can have one, which view shows, and the live one.
+    terminal: { available: false, running: false },
+    view: 'story' as 'story' | 'terminal',
+    term: null as { id: string; view: TerminalView | null; state: TerminalState | null } | null,
   };
 
   function reset(extra: Partial<typeof state> = {}) {
@@ -84,8 +95,10 @@ export function createPanel(options: PanelOptions): Panel {
 
   function open(id: string) {
     if (state.id !== id) {
-      reset({ editor: null });
+      closeTerminal();
+      reset({ editor: null, terminal: { available: false, running: false }, view: 'story' });
       void loadEditor(id);
+      void loadTerminal(id);
     }
     state.id = id;
     root.hidden = false;
@@ -96,6 +109,8 @@ export function createPanel(options: PanelOptions): Panel {
   }
 
   function close() {
+    closeTerminal();
+    state.view = 'story';
     clearTimeout(state.timer);
     Object.assign(state, { id: null, helper: null, story: null, timer: 0 });
     root.hidden = true;
@@ -144,6 +159,62 @@ export function createPanel(options: PanelOptions): Panel {
     toast(`Opening the conversation in VS Code, in ${editor.name}…`);
   }
 
+  async function loadTerminal(id: string) {
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/terminal`);
+      if (res.ok && state.id === id) state.terminal = (await res.json()) as { available: boolean; running: boolean };
+    } catch { /* no button */ }
+    if (state.id === id) refresh();
+  }
+
+  // The terminal keeps its connection while I flip back to the story; it closes with the panel,
+  // and the program carries on in the hub.
+  async function showTerminal(show: boolean) {
+    const id = state.id;
+    state.view = show ? 'terminal' : 'story';
+    refresh();
+    if (!show || !id || state.term?.id === id) return state.term?.view?.focus();
+    closeTerminal();
+    const term: NonNullable<typeof state.term> = { id, view: null, state: null };
+    state.term = term;
+    renderTermBar();
+    try {
+      term.view = await openTerminal($('term-host'), id, (next) => {
+        term.state = next;
+        if (state.term !== term) return;
+        state.terminal.running = next.running;
+        renderTermBar();
+        refresh();
+      });
+      if (state.term !== term) term.view.dispose();
+      else term.view.focus();
+    } catch {
+      $('term-state').textContent = "The terminal couldn't load. Run npm install in the Mira folder and reload.";
+    }
+  }
+
+  function closeTerminal() {
+    state.term?.view?.dispose();
+    state.term = null;
+    $('term-host').replaceChildren();
+  }
+
+  function renderTermBar() {
+    const t = state.term?.state;
+    const session = state.id ? options.session(state.id) : undefined;
+    const what = t?.title ? `<code>${esc(t.title)}</code>` : 'the session';
+    let text = 'Connecting…';
+    if (t && !t.connected) text = "Not connected to the hub. Close the story and open it again.";
+    else if (t?.running) text = `Running ${what}. Closing the story leaves it running.`;
+    else if (t && t.exitCode !== null && t.exitCode !== undefined) text = `${what} ended (exit code ${t.exitCode}).`;
+    else if (t) text = `Carries this conversation on here with ${what}${session?.cwd ? `, in ${esc(folder(session.cwd))}` : ''}. If it's open in VS Code or another terminal, close it there first.`;
+    $('term-state').innerHTML = text;
+    const start = $('term-start');
+    start.hidden = !t?.connected || t.running;
+    start.textContent = t?.exitCode !== null && t?.exitCode !== undefined ? 'Resume again' : 'Resume here';
+    $('term-stop').hidden = !t?.connected || !t.running;
+  }
+
   // At most one refresh every couple of seconds while the session is busy.
   function event(e: MiraEvent) {
     if (!state.id || (e.actor.id !== state.id && e.actor.parent !== state.id) || state.timer) return;
@@ -158,6 +229,14 @@ export function createPanel(options: PanelOptions): Panel {
     $('sub').textContent = state.helper ? `Subagent of ${name}`
       : session ? [...new Set([options.projectLabel?.(session.system) ?? session.system, folder(session.cwd)])].concat(STATUS_LABEL[session.status ?? ''] ?? []).filter(Boolean).join(' · ') : '';
     $('back').hidden = !state.helper;
+    const terminal = $('terminal');
+    terminal.hidden = Boolean(state.helper) || !state.terminal.available;
+    terminal.textContent = state.view === 'terminal' ? 'Story' : state.terminal.running ? 'Terminal ●' : 'Terminal';
+    terminal.title = state.view === 'terminal' ? 'Back to the story' : state.terminal.running ? 'A terminal is running this session' : 'Carry this session on in a terminal here';
+    const inTerminal = state.view === 'terminal' && !state.helper;
+    $('term').hidden = !inTerminal;
+    $('totals').hidden = inTerminal;
+    $('turns').hidden = inTerminal;
     $('rename').hidden = Boolean(state.helper) || !session;
     $('remove').hidden = Boolean(state.helper) || !session;
     const editor = $('editor') as HTMLAnchorElement;
@@ -289,6 +368,12 @@ export function createPanel(options: PanelOptions): Panel {
     if (session && target.closest('[data-rename]')) return void renameThing('session', session.id, sessionLabel(session));
     if (session && target.closest('[data-remove]')) return void removeThing('session', session.id, sessionLabel(session)).then((done) => { if (done) close(); });
     if (target.closest('[data-editor]')) return continueInEditor();
+    if (target.closest('[data-terminal]')) return void showTerminal(state.view !== 'terminal');
+    if (target.closest('[data-term-start]')) return state.term?.view?.start();
+    if (target.closest('[data-term-stop]')) {
+      const title = state.term?.state?.title ?? 'the program';
+      return void confirmStop(title).then((yes) => { if (yes) state.term?.view?.stop(); });
+    }
     if (target.closest('[data-back]')) {
       reset();
       refresh();
@@ -296,7 +381,8 @@ export function createPanel(options: PanelOptions): Panel {
     }
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && state.id) close();
+    // Escape inside the terminal belongs to the program (Claude Code uses it to interrupt).
+    if (e.key === 'Escape' && state.id && !(e.target as HTMLElement | null)?.closest?.('.term-host')) close();
   });
 
   return { open, close, current: () => state.id, refresh, event };
@@ -304,3 +390,13 @@ export function createPanel(options: PanelOptions): Panel {
 
 /** The session named in the page's `#session=<id>`, if any. */
 export const linkedSession = () => location.hash.match(/^#session=([\w-]+)$/)?.[1];
+
+function confirmStop(title: string): Promise<boolean> {
+  const box = showDialog('Stop the terminal', `<form method="dialog" class="dialog-body">
+    <header class="dialog-head"><h2>Stop ${esc(title)}?</h2></header>
+    <p class="hint">It ends the program running in the terminal, even mid-turn. The conversation itself is kept, and can be resumed again.</p>
+    <div class="actions"><button type="submit" class="stop" value="stop">Stop</button><button type="submit" class="ghost" value="cancel">Cancel</button></div>
+  </form>`);
+  (box.querySelector('[value="cancel"]') as HTMLButtonElement).focus();
+  return new Promise((done) => box.addEventListener('close', () => done(box.returnValue === 'stop'), { once: true }));
+}

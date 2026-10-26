@@ -16,6 +16,9 @@ const FIXED: Record<string, { file: URL; type: string }> = {
   '/sky': { file: new URL('index.html', WEB), type: 'text/html; charset=utf-8' }, // the address the sky had before
   '/markdown.js': { file: new URL('markdown.js', WEB), type: SCRIPT },
   '/vendor/phaser.js': { file: new URL('../../node_modules/phaser/dist/phaser.min.js', import.meta.url), type: SCRIPT },
+  '/vendor/xterm.js': { file: new URL('../../node_modules/@xterm/xterm/lib/xterm.js', import.meta.url), type: SCRIPT },
+  '/vendor/xterm-fit.js': { file: new URL('../../node_modules/@xterm/addon-fit/lib/addon-fit.js', import.meta.url), type: SCRIPT },
+  '/vendor/xterm.css': { file: new URL('../../node_modules/@xterm/xterm/css/xterm.css', import.meta.url), type: 'text/css; charset=utf-8' },
 };
 
 export interface WebFile {

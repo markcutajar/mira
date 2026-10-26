@@ -110,6 +110,19 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
       return { folder: session.cwd, link: `vscode://anthropic.claude-code/open?session=${session.id}` };
     },
 
+    // `claude --resume` in the session's folder. On Windows the npm-installed `claude` is a .cmd
+    // shim, which only cmd.exe can run.
+    terminalFor(session) {
+      if (!session.cwd || !SESSION_ID.test(session.id)) return null;
+      const args = ['--resume', session.id];
+      return {
+        file: process.platform === 'win32' ? 'cmd.exe' : 'claude',
+        args: process.platform === 'win32' ? ['/d', '/c', 'claude', ...args] : args,
+        cwd: session.cwd,
+        title: `claude --resume ${session.id.slice(0, 8)}`,
+      };
+    },
+
     // Without a session, the same link opens a new chat; the extension types the prompt into its
     // input box and leaves sending it to me.
     startAt(_folder, prompt) {

@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { WebSocketServer } from 'ws';
 import { CONTRACT_VERSION, MiraEvent } from '../../contracts/src/index.ts';
 import type { Editor, EditorTarget } from './editor.ts';
 import type { Growth } from './growth.ts';
@@ -14,6 +15,7 @@ import type { Roster } from './roster.ts';
 import type { SourceAdapter } from './sources.ts';
 import type { Kind, Store } from './store.ts';
 import type { Place } from './systems.ts';
+import { Terminals } from './terminals.ts';
 import { serveWeb, webFile } from './web.ts';
 
 type Payload = Record<string, unknown>;
@@ -235,6 +237,7 @@ export function createHub(options: HubOptions) {
     const prompt = url.pathname.match(/^\/api\/prompts\/([\w-]+)$/);
     const ingestFor = req.method === 'POST' ? sources.get(url.pathname.match(/^\/ingest\/([a-z0-9-]+)$/)?.[1] ?? '') : undefined;
     const storyOf = req.method === 'GET' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/story$/)?.[1] : undefined;
+    const terminalOf = req.method === 'GET' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/terminal$/)?.[1] : undefined;
     const editorOf = req.method === 'GET' || req.method === 'POST' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/editor$/)?.[1] : undefined;
     const manage = req.method === 'PUT' || req.method === 'POST' ? url.pathname.match(/^\/api\/(names|remove)\/(system|session)\/([^/]{1,240})$/) : null;
     const startOf = req.method === 'GET' || req.method === 'POST' ? url.pathname.match(/^\/api\/systems\/([^/]{1,240})\/start$/)?.[1] : undefined;
@@ -243,6 +246,7 @@ export function createHub(options: HubOptions) {
     if (route === 'GET /api/sessions') return json(res, { sessions: sessions(), pending: permissions.pending(), waitSeconds: options.permissionWaitMs / 1000 });
     if (route === 'GET /api/events') return json(res, store.recent(clamp(Number(url.searchParams.get('limit') ?? 100), 1, 500)));
     if (storyOf) return story(res, storyOf, url);
+    if (terminalOf) return terminal(res, terminalOf);
     if (editorOf) return editor(req, res, editorOf);
     if (startOf) return void startIn(req, res, decodeName(startOf));
     if (route === 'GET /api/stream') return stream(req, res, url);
@@ -266,8 +270,34 @@ export function createHub(options: HubOptions) {
   }, HEARTBEAT_MS);
   heartbeat.unref();
 
+  // Terminals (decision 36): GET /api/sessions/<id>/terminal says whether a session can have one and
+  // whether it's running; the WebSocket at the same address carries it, with the same checks as
+  // every other request, so no other site can reach it.
+  const terminals = new Terminals();
+  const sockets = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+  const terminalSpec = (id: string) => {
+    const session = roster.get(id);
+    return session ? (sources.get(session.source)?.terminalFor?.(session) ?? null) : null;
+  };
+  function terminal(res: ServerResponse, id: string) {
+    json(res, { available: Boolean(terminalSpec(id)), running: terminals.running(id) });
+  }
+  server.on('upgrade', (req, socket, head) => {
+    const port = (server.address() as AddressInfo).port;
+    const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
+    const id = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/terminal$/)?.[1];
+    if (!id || !fromThisMachine(req, port) || !terminalSpec(id)) {
+      socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+      return;
+    }
+    const size = { cols: clamp(Number(url.searchParams.get('cols') ?? 100), 10, 500), rows: clamp(Number(url.searchParams.get('rows') ?? 30), 5, 200) };
+    sockets.handleUpgrade(req, socket, head, (ws) => terminals.attach(id, ws, terminalSpec(id), size));
+  });
+
   function close() {
     clearInterval(heartbeat);
+    terminals.closeAll();
+    sockets.close();
     for (const viewer of viewers.values()) viewer.res.end();
     viewers.clear();
     server.closeAllConnections();

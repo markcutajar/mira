@@ -21,11 +21,16 @@
     "recorder": "node tools/hook-recorder/recorder.mjs"
   },
   "dependencies": {
+    "@lydell/node-pty": "1.1.0",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
     "phaser": "3.90.0",
+    "ws": "8.22.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
+    "@types/ws": "8.18.1",
     "typescript": "7.0.2"
   }
 }

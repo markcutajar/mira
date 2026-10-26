@@ -4,6 +4,7 @@
 
 import type { MiraEvent, Status } from '../../contracts/src/index.ts';
 import type { SessionView } from './roster.ts';
+import type { TerminalSpec } from './terminals.ts';
 
 export interface UsageTotals {
   input: number;
@@ -87,6 +88,8 @@ export interface SourceAdapter {
   continueAt?(session: SessionView): { folder: string; link: string } | null;
   /** A link that starts a new session in a project folder, with a prompt typed in for me to send (decision 29). */
   startAt?(folder: string, prompt?: string): { link: string } | null;
+  /** The command that carries a session on in a terminal the page shows (decision 36). */
+  terminalFor?(session: SessionView): TerminalSpec | null;
 }
 
 export const emptyUsage = (): UsageTotals => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 });
