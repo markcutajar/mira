@@ -159,12 +159,15 @@ export function createPanel(options: PanelOptions): Panel {
     toast(`Opening the conversation in VS Code, in ${editor.name}…`);
   }
 
+  // A session whose terminal is running opens straight onto it.
   async function loadTerminal(id: string) {
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/terminal`);
       if (res.ok && state.id === id) state.terminal = (await res.json()) as { available: boolean; running: boolean };
     } catch { /* no button */ }
-    if (state.id === id) refresh();
+    if (state.id !== id) return;
+    if (state.terminal.running && state.view === 'story' && !state.helper) return void showTerminal(true);
+    refresh();
   }
 
   // The terminal keeps its connection while I flip back to the story; it closes with the panel,
