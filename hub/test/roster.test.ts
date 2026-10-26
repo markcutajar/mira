@@ -99,6 +99,20 @@ describe('Roster', () => {
     assert.equal(session?.cwd, 'C:\\code\\mira');
   });
 
+  it('lets quiet sessions go: working ones after an hour, others after twelve, never one waiting on me', () => {
+    const roster = new Roster();
+    roster.apply(ev('prompt.submitted', 'working', 0, { actor: { kind: 'session', id: 'busy' } }));
+    roster.apply(ev('turn.ended', 'my-turn', 0, { actor: { kind: 'session', id: 'idle' } }));
+    roster.apply(ev('permission.requested', 'needs-me', 0, { actor: { kind: 'session', id: 'asking' } }));
+    const shown = (at: string) => roster.snapshot(Date.parse(at)).map((s) => s.id).sort();
+    assert.deepEqual(shown('2026-10-25T18:59:00Z'), ['asking', 'busy', 'idle']);
+    assert.deepEqual(shown('2026-10-25T19:01:00Z'), ['asking', 'idle']);
+    assert.deepEqual(shown('2026-10-26T06:01:00Z'), ['asking']);
+    const patient = new Roster({ workingMs: 3 * 60 * 60 * 1000 });
+    patient.apply(ev('prompt.submitted', 'working', 0));
+    assert.equal(patient.snapshot(Date.parse('2026-10-25T20:00:00Z')).length, 1);
+  });
+
   it('hides sessions five minutes after they end', () => {
     const roster = new Roster();
     roster.apply(ev('session.ended', 'ended', 0));

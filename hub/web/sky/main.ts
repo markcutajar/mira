@@ -50,6 +50,7 @@ const panel = createPanel({
   onChange: (id) => {
     scene.select(id);
     if (id) scene.reveal(id);
+    else scene.showIsland(); // closing a story goes back to the whole island
     sidebar.render();
   },
 });

@@ -5,7 +5,17 @@ Receives events from each agent source, keeps the live picture of every session,
 ## Run it
 
 ```bash
-npm start        # or: npm run dev, which restarts when the code changes
+npm start        # in this terminal; or npm run dev, which restarts when the code changes
+```
+
+To keep it running without a terminal (decision 34):
+
+```bash
+npm run hub:background   # start it in the background, logging to ~/.mira/hub.log
+npm run hub:status       # is it running, and does it start at login?
+npm run hub:restart      # after pulling changes
+npm run hub:stop
+npm run hub:login        # start it at login (Windows); undo with npm run hub:login-off
 ```
 
 Then open `http://127.0.0.1:4711`. It's one page (decision 31): the island fills the window, the board runs down the left, and a session's story opens on the right.
@@ -16,15 +26,16 @@ Then open `http://127.0.0.1:4711`. It's one page (decision 31): the island fills
 - **Starting a session.** "+ New" on a project opens a new Claude Code chat in its VS Code window, with a prompt you type in Mira already in the box; you send it from VS Code (decision 29).
 - **Renaming and removing.** A project's ⋯ menu has Rename and Remove, and the story has them for its session. Your names and removals are kept in `mira.db`; a removed project or session comes back once something happens in it again, and ended sessions leave on their own after five minutes (decision 30).
 
-**The story** shows every turn with its prompt, replies and tool calls, the subagents it started, and tokens and estimated cost for each turn and the whole session. Replies are rendered from Markdown by [web/markdown.js](web/markdown.js), which escapes all text first, so HTML in a reply shows as text; links open only for http(s), and links to repo files show as their names. The latest turn starts unfolded and the story follows the session live. "Continue in VS Code" at the top opens the conversation in Claude Code's chat panel, in the VS Code window whose workspace holds the session's folder, or in a new window on that folder. A link to the page with `#session=<id>` opens that session's story. Titles and stories are read from the transcripts when needed, and never stored.
+**The story** shows every turn with its prompt, replies and tool calls, the subagents it started, and tokens and estimated cost for each turn and the whole session. Replies are rendered from Markdown by [web/markdown.js](web/markdown.js), which escapes all text first, so HTML in a reply shows as text; links open only for http(s), and links to repo files show as their names. The latest turn starts unfolded and the story follows the session live, and closing it zooms back out to the whole island, centred. "Continue in VS Code" at the top opens the conversation in Claude Code's chat panel, in the VS Code window whose workspace holds the session's folder, or in a new window on that folder. A link to the page with `#session=<id>` opens that session's story. Titles and stories are read from the transcripts when needed, and never stored.
 
 On startup it rebuilds today's picture from stored events, reads recent Claude Code transcripts to find sessions that ran while it was stopped, and stores the token counts of turns that ended in the last day. Everything it keeps is in `~/.mira`:
 
 | Path | What |
 |---|---|
-| `mira.db` | Every event, including one usage event per finished turn, in SQLite (decisions 17 and 23) |
+| `mira.db` | Events for 90 days, and every per-turn usage event, in SQLite (decisions 17, 23 and 32) |
 | `recordings/` | Payload shapes, as the step 0 recorder wrote them, while `recordShapes` is on |
 | `config.json` | Optional settings, below |
+| `hub.log`, `hub.pid` | The log and process ID of a hub running in the background |
 
 ## Settings
 
@@ -37,6 +48,8 @@ On startup it rebuilds today's picture from stored events, reads recent Claude C
   "permissionWaitSeconds": 60,
   "activeHours": 2,
   "recordShapes": true,
+  "keepDays": 90,
+  "quiet": { "workingMinutes": 60, "idleHours": 12 },
   "prices": { "claude-opus-5-5": { "input": 4, "output": 20, "cacheRead": 0.2 } }
 }
 ```
@@ -44,6 +57,8 @@ On startup it rebuilds today's picture from stored events, reads recent Claude C
 - `systems` renames or groups sections by folder, before anything reaches the store; Rename in Mira only changes the name shown (decision 30). Keys are repo folder names; giving two folders the same name puts them in one section. Git worktrees join their main repo's section on their own, labelled with the worktree's folder name, so they need no entry here.
 - `permissionWaitSeconds` is how long a prompt waits for Mira while Mira is open. Keep it below the `PermissionRequest` hook's timeout, which is 65 seconds.
 - `activeHours` is how recent a transcript must be for its session to count as running at startup.
+- `keepDays` is how many days of events to keep; 0 keeps everything. Per-turn token counts are always kept (decision 32).
+- `quiet` is how long a session with no events stays in view: one still working, and any other. One waiting on a prompt always stays (decision 33).
 - `prices` overrides or adds model prices for cost estimates, in US dollars per million tokens. Cache writes default to 1.25 times input for five minutes and twice input for an hour; set `cacheWrite5m` or `cacheWrite1h` to change them. The built-in table, in [src/pricing.ts](src/pricing.ts), holds Anthropic's first-party API prices as of October 2026. On a subscription these are only a measure of use, not a bill.
 
 ## Claude Code hooks

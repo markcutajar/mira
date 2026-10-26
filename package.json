@@ -9,6 +9,12 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning hub/src/main.ts",
     "dev": "node --disable-warning=ExperimentalWarning --watch hub/src/main.ts",
+    "hub:background": "node --disable-warning=ExperimentalWarning hub/src/control.ts start",
+    "hub:stop": "node --disable-warning=ExperimentalWarning hub/src/control.ts stop",
+    "hub:restart": "node --disable-warning=ExperimentalWarning hub/src/control.ts restart",
+    "hub:status": "node --disable-warning=ExperimentalWarning hub/src/control.ts status",
+    "hub:login": "node --disable-warning=ExperimentalWarning hub/src/control.ts login",
+    "hub:login-off": "node --disable-warning=ExperimentalWarning hub/src/control.ts login-off",
     "typecheck": "tsc -p . && tsc -p tsconfig.web.json",
     "test": "node --disable-warning=ExperimentalWarning --test \"contracts/test/*.test.ts\" \"hub/test/*.test.ts\"",
     "contract:schema": "node contracts/scripts/emit-schema.ts",

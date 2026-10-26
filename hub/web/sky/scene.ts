@@ -186,6 +186,11 @@ export class SkyScene extends Phaser.Scene {
     this.#setZoom(section >= 0 ? section : this.#zoomIdx, this.#tileXY(c0 + SEC / 2, r0 + SEC / 2));
   }
 
+  /** Zooms out to the whole island, centred in the clear space; for when a story closes. */
+  showIsland(): void {
+    if (this.#ready && this.#sections.length) this.#setZoom(0);
+  }
+
   /** Lays the camera out again after the page's panels change size, such as the side panel folding away. */
   relayout(): void {
     if (!this.#ready || !this.#sections.length) return;

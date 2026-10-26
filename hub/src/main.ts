@@ -1,5 +1,6 @@
 // Starts the hub: rebuilds the live picture from storage and each source, then listens.
 
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MiraEvent } from '../../contracts/src/index.ts';
 import { claudeCode } from './claude-code/source.ts';
@@ -19,8 +20,18 @@ const DAY = 24 * HOUR;
 const config = loadConfig();
 const store = new Store(join(miraHome, 'mira.db'));
 const placeFor = makePlaceResolver(config.systems);
-const roster = new Roster();
+const roster = new Roster({ workingMs: config.quiet.workingMinutes * 60 * 1000, idleMs: config.quiet.idleHours * HOUR });
+const pidFile = join(miraHome, 'hub.pid');
 const sources: SourceAdapter[] = [claudeCode({ projectsDir: claudeProjects, placeFor, costOf: makeCostOf(config.prices) })];
+
+// Old events go once a day, keeping the per-turn token counts (decision 32).
+function prune() {
+  if (!config.keepDays) return;
+  const removed = store.prune(new Date(Date.now() - config.keepDays * DAY).toISOString());
+  if (removed) console.log(`Removed ${removed} events older than ${config.keepDays} days.`);
+}
+prune();
+setInterval(prune, DAY).unref();
 
 // Today's statuses from stored events, then sessions that ran while the hub was stopped.
 const now = Date.now();
@@ -51,15 +62,19 @@ hub.server.on('error', (err: NodeJS.ErrnoException) => {
 });
 
 hub.server.listen(config.port, '127.0.0.1', () => {
+  writeFileSync(pidFile, String(process.pid)); // so `npm run hub:stop` can find a hub running in the background
   const sessions = roster.snapshot();
   console.log(`Mira hub on http://127.0.0.1:${config.port} · ${sessions.length} session${sessions.length === 1 ? '' : 's'} in view · data in ${miraHome}`);
 });
 
-process.on('SIGINT', () => {
+function shutDown() {
   hub.close();
   store.close();
+  rmSync(pidFile, { force: true });
   process.exit(0);
-});
+}
+process.on('SIGINT', shutDown);
+process.on('SIGTERM', shutDown);
 
 function describe(event: MiraEvent): string {
   const time = new Date(event.at).toTimeString().slice(0, 8);

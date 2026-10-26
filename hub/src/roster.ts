@@ -48,8 +48,19 @@ const ENDED_TURNS_KEPT = 50;
 // Long enough to see that a session ended, short enough not to linger (decision 30).
 const ENDED_VISIBLE_MS = 5 * 60 * 1000;
 
+/** How long a quiet session stays in view (decision 33): one still 'working', and any other. */
+export interface QuietTimes {
+  workingMs: number;
+  idleMs: number;
+}
+
 export class Roster {
   #sessions = new Map<string, Session>();
+  #quiet: QuietTimes;
+
+  constructor(quiet: Partial<QuietTimes> = {}) {
+    this.#quiet = { workingMs: 60 * 60 * 1000, idleMs: 12 * 60 * 60 * 1000, ...quiet };
+  }
 
   apply(event: MiraEvent): void {
     const sessionId = event.actor.kind === 'subagent' ? event.actor.parent : event.actor.id;
@@ -103,10 +114,14 @@ export class Roster {
     }
   }
 
-  /** Sessions worth showing: everything still running, plus sessions that ended in the last five minutes. */
+  /**
+   * Sessions worth showing. Ended ones stay a few minutes; one that has gone quiet leaves, since a
+   * session that dies without ending sends nothing more, and comes back with its next event. A
+   * session waiting on a prompt always stays (decision 33).
+   */
   snapshot(now = Date.now()): SessionView[] {
     return [...this.#sessions.values()]
-      .filter((s) => s.status !== 'ended' || now - Date.parse(s.lastAt) < ENDED_VISIBLE_MS)
+      .filter((s) => this.#inView(s, now))
       .sort((a, b) => a.system.localeCompare(b.system) || b.lastAt.localeCompare(a.lastAt))
       .map((s) => this.#view(s));
   }
@@ -115,6 +130,13 @@ export class Roster {
   get(id: string): SessionView | undefined {
     const s = this.#sessions.get(id);
     return s ? this.#view(s) : undefined;
+  }
+
+  #inView(s: Session, now: number): boolean {
+    const quiet = now - Date.parse(s.lastAt);
+    if (s.status === 'needs-me') return true;
+    if (s.status === 'ended') return quiet < ENDED_VISIBLE_MS;
+    return quiet < (s.status === 'working' ? this.#quiet.workingMs : this.#quiet.idleMs);
   }
 
   #addUsage(sessionId: string, event: MiraEvent): void {

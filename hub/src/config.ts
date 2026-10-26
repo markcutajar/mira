@@ -17,6 +17,10 @@ const Config = z.object({
   permissionWaitSeconds: z.number().int().min(1).max(600).default(60),
   /** On startup, sessions whose transcripts changed this recently count as still running. */
   activeHours: z.number().min(0).max(72).default(2),
+  /** Days of events to keep; per-turn token counts are kept regardless (decision 32). 0 keeps everything. */
+  keepDays: z.number().int().min(0).default(90),
+  /** How long a quiet session stays in view: one still working, and any other (decision 33). */
+  quiet: z.object({ workingMinutes: z.number().min(1).default(60), idleHours: z.number().min(1).default(12) }).default({ workingMinutes: 60, idleHours: 12 }),
   /** Override or add model prices, in US dollars per million tokens, for cost estimates. */
   prices: z.record(z.string(), Price).default({}),
 });

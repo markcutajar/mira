@@ -37,6 +37,16 @@ describe('Store', () => {
     store.close();
   });
 
+  it('prunes old events but keeps the token counts that are the cost history', () => {
+    const store = new Store(':memory:');
+    store.add(event('00000000-0000-4000-8000-000000000301', '2026-06-01T12:00:00.000Z'));
+    store.add({ ...event('00000000-0000-4000-8000-000000000302', '2026-06-01T12:00:00.000Z'), type: 'usage.reported', status: undefined, usage: { outputTokens: 5 } });
+    store.add(event('00000000-0000-4000-8000-000000000303', '2026-10-25T12:00:00.000Z'));
+    assert.equal(store.prune('2026-07-27T00:00:00.000Z'), 1);
+    assert.deepEqual(store.since('2026-01-01T00:00:00.000Z').map((e) => e.id.slice(-3)), ['302', '303']);
+    store.close();
+  });
+
   it('keeps my names and removals, and forgets a name set to empty', () => {
     const store = new Store(':memory:');
     store.setName('system', 'acme-core', 'Acme');

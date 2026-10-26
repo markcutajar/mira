@@ -21,6 +21,7 @@ export class Store {
   #clearName: StatementSync;
   #removed: StatementSync;
   #remove: StatementSync;
+  #prune: StatementSync;
 
   constructor(file: string) {
     if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
@@ -55,6 +56,7 @@ export class Store {
     this.#clearName = this.#db.prepare('DELETE FROM names WHERE kind = ? AND key = ?');
     this.#removed = this.#db.prepare('SELECT key, at FROM removed WHERE kind = ?');
     this.#remove = this.#db.prepare('INSERT INTO removed (kind, key, at) VALUES (?, ?, ?) ON CONFLICT (kind, key) DO UPDATE SET at = excluded.at');
+    this.#prune = this.#db.prepare("DELETE FROM events WHERE at < ? AND type != 'usage.reported'");
     this.#folders = this.#db.prepare("SELECT json_extract(body, '$.detail.cwd') AS cwd FROM events WHERE system = ? AND type != 'session.moved' AND cwd IS NOT NULL GROUP BY cwd ORDER BY MAX(at) DESC LIMIT ?");
   }
 
@@ -104,6 +106,11 @@ export class Store {
   /** Removes a project or session from view as of `at`; anything that happens after brings it back. */
   remove(kind: Kind, key: string, at: string): void {
     this.#remove.run(kind, key, at);
+  }
+
+  /** Deletes events from before `at`, keeping per-turn token counts, which are the cost history (decision 32). */
+  prune(at: string): number {
+    return Number(this.#prune.run(at).changes);
   }
 
   close(): void {
