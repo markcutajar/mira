@@ -5,6 +5,7 @@ import type { MiraEvent } from '../../contracts/src/index.ts';
 import { claudeCode } from './claude-code/source.ts';
 import { Colony } from './colony.ts';
 import { claudeProjects, loadConfig, miraHome } from './config.ts';
+import { vscode } from './editor.ts';
 import { makeCostOf } from './pricing.ts';
 import { createHub } from './server.ts';
 import { shapeRecorder } from './shapes.ts';
@@ -39,6 +40,7 @@ const hub = createHub({
   permissionWaitMs: config.permissionWaitSeconds * 1000,
   recordShape: config.recordShapes ? shapeRecorder(join(miraHome, 'recordings')) : undefined,
   onEvent: (event) => console.log(describe(event)),
+  editor: vscode(),
 });
 
 hub.server.on('error', (err: NodeJS.ErrnoException) => {

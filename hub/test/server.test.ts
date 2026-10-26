@@ -15,15 +15,19 @@ const claude: SourceAdapter = {
   ingest: (payload, at) => normalise(payload, { at: at.toISOString(), system: 'mira' }),
   title: (s) => (s.transcript ? 'Hub work' : undefined),
   story: (s, { helper }) => (s.transcript ? { sessionId: s.id, helperId: helper, usage: emptyUsage(), turns: [], earlier: 0 } : null),
+  continueAt: (s) => (s.cwd ? { folder: s.cwd, link: `vscode://claude/open?session=${s.id}` } : null),
   followUp: (event, emit) => {
     if (event.type !== 'turn.ended') return;
     const { status, ...rest } = event;
     emit({ ...rest, id: stableId(`usage:${event.id}`), type: 'usage.reported', usage: { inputTokens: 10, outputTokens: 20, costUsd: 0.5 } });
   },
 };
+// A stand-in for VS Code, so no test ever opens a window.
+const opened: string[] = [];
+const editor = { target: (folder: string) => ({ link: `vscode://file/${folder}`, name: 'mira (Workspace)' }), open: (link: string) => void opened.push(link) };
 const store = new Store(':memory:');
 const colony = new Colony();
-const hub = createHub({ store, colony, sources: [claude], placeFor: () => ({ system: 'mira' }), permissionWaitMs: 5000 });
+const hub = createHub({ store, colony, sources: [claude], placeFor: () => ({ system: 'mira' }), permissionWaitMs: 5000, editor, editorDelayMs: 0 });
 let base = '';
 
 const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -121,6 +125,15 @@ describe('hub server', () => {
     assert.equal((await fetch(`${base}/api/sessions/nobody/story`)).status, 404);
     assert.equal((await fetch(`${base}/api/sessions/s-1/story`)).status, 404); // s-1 has no transcript
     assert.equal((await post('/ingest/not-a-source', { hook_event_name: 'Stop', session_id: 's-x' })).status, 404);
+  });
+
+  it('names the editor window for a session, then opens the session there', async () => {
+    const target = await (await fetch(`${base}/api/sessions/s-5/editor`)).json();
+    assert.deepEqual(target, { link: 'vscode://file/C:\\code\\mira', name: 'mira (Workspace)' });
+    assert.equal((await post('/api/sessions/s-5/editor', {})).status, 204);
+    await new Promise((done) => setTimeout(done, 20));
+    assert.deepEqual(opened, ['vscode://claude/open?session=s-5']);
+    assert.equal((await fetch(`${base}/api/sessions/nobody/editor`)).status, 404);
   });
 
   it('records what a source reports after an event, such as token use', async () => {

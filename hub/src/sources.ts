@@ -83,6 +83,8 @@ export interface SourceAdapter {
   title?(session: SessionView): string | undefined;
   /** The session's story, or one helper's, for the panel. */
   story?(session: SessionView, options: { helper?: string; turns: number }): Story | null;
+  /** Where to carry a session on in an editor: its folder, and a link that opens the session there. */
+  continueAt?(session: SessionView): { folder: string; link: string } | null;
 }
 
 export const emptyUsage = (): UsageTotals => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 });

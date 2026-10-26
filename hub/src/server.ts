@@ -9,6 +9,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { CONTRACT_VERSION, MiraEvent } from '../../contracts/src/index.ts';
 import type { Colony } from './colony.ts';
+import type { Editor } from './editor.ts';
 import { Permissions, summarise, type Decision } from './permissions.ts';
 import type { SourceAdapter } from './sources.ts';
 import type { Store } from './store.ts';
@@ -24,6 +25,9 @@ export interface HubOptions {
   permissionWaitMs: number;
   recordShape?: (source: string, payload: Payload, bytes: number) => void;
   onEvent?: (event: MiraEvent) => void;
+  /** Opens sessions in an editor; without it the board offers no editor button. */
+  editor?: Editor;
+  editorDelayMs?: number;
 }
 
 interface Viewer {
@@ -33,6 +37,7 @@ interface Viewer {
 
 const MAX_BODY = 16 * 1024 * 1024;
 const STORY_TURNS = 30;
+const EDITOR_DELAY_MS = 1500;
 const CLOCK_SKEW_MS = 10 * 60 * 1000;
 const HEARTBEAT_MS = 25 * 1000;
 const PAGES: Record<string, { file: URL; type: string }> = {
@@ -145,6 +150,18 @@ export function createHub(options: HubOptions) {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(told));
   }
 
+  // GET says which editor window holds the session, for the board's link; POST then opens the
+  // session there, after the board's link has had a moment to bring that window forward.
+  function editor(req: IncomingMessage, res: ServerResponse, id: string) {
+    const session = colony.get(id);
+    const at = session ? sources.get(session.source)?.continueAt?.(session) : undefined;
+    const target = at ? options.editor?.target(at.folder) : undefined;
+    if (!at || !target) return reply(res, 404, "That session can't be opened in an editor.");
+    if (req.method === 'GET') return json(res, target);
+    setTimeout(() => options.editor?.open(at.link), options.editorDelayMs ?? EDITOR_DELAY_MS).unref();
+    res.writeHead(204).end();
+  }
+
   const server = createServer((req, res) => {
     const port = (server.address() as AddressInfo).port;
     if (!fromThisMachine(req, port)) return reply(res, 403, 'Mira only accepts requests from this machine.');
@@ -153,11 +170,13 @@ export function createHub(options: HubOptions) {
     const prompt = url.pathname.match(/^\/api\/prompts\/([\w-]+)$/);
     const ingestFor = req.method === 'POST' ? sources.get(url.pathname.match(/^\/ingest\/([a-z0-9-]+)$/)?.[1] ?? '') : undefined;
     const storyOf = req.method === 'GET' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/story$/)?.[1] : undefined;
+    const editorOf = req.method === 'GET' || req.method === 'POST' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/editor$/)?.[1] : undefined;
     if (ingestFor?.ingest) return void ingest(req, res, ingestFor);
     if (route === 'POST /hooks/permission') return void permission(req, res);
     if (route === 'GET /api/sessions') return json(res, { sessions: sessions(), pending: permissions.pending(), waitSeconds: options.permissionWaitMs / 1000 });
     if (route === 'GET /api/events') return json(res, store.recent(clamp(Number(url.searchParams.get('limit') ?? 100), 1, 500)));
     if (storyOf) return story(res, storyOf, url);
+    if (editorOf) return editor(req, res, editorOf);
     if (route === 'GET /api/stream') return stream(req, res, url);
     if (route === 'POST /api/presence') return void presence(req, res);
     if (req.method === 'POST' && prompt?.[1]) return void answer(req, res, prompt[1]);

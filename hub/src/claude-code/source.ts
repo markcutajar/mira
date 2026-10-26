@@ -87,8 +87,16 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
       if (!transcript || (helper && !/^[\w-]{1,80}$/.test(helper))) return null;
       return readStory(transcript, { costOf, turns, helper });
     },
+
+    // The Claude Code extension opens a session in its chat panel from this link.
+    continueAt(session) {
+      if (!session.cwd || !SESSION_ID.test(session.id)) return null;
+      return { folder: session.cwd, link: `vscode://anthropic.claude-code/open?session=${session.id}` };
+    },
   };
 }
+
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function usageEvent(actor: Actor, system: string, turn: Turn, ref: MiraEvent['ref']): MiraEvent | null {
   const u = turn.own;

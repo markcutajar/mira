@@ -77,7 +77,8 @@
   .go { background: var(--working); color: var(--void); }
   .stop { background: transparent; color: var(--failed); border-color: var(--failed); }
   .ghost { background: transparent; color: var(--dim); border-color: var(--hull-edge); }
-  .ghost.small { padding: 3px 9px; font-size: 12px; }
+  .ghost.small, .go.small { padding: 3px 9px; font-size: 12px; }
+  a.go, a.ghost { display: inline-block; text-decoration: none; }
   button:disabled { opacity: 0.5; cursor: default; }
 
   #sections { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 16px; align-items: start; }
@@ -114,7 +115,8 @@
   /* The story panel: one session, turn by turn, read from its transcript when opened. */
   .panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 3; width: min(760px, 100%); display: flex; flex-direction: column; background: var(--hull); border-left: 2px solid var(--hull-edge); box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45); }
   .panel-head { display: flex; align-items: flex-start; gap: 12px; padding: 14px 18px 10px; border-bottom: 1px solid var(--hull-edge); }
-  .panel-head > div { flex: 1; min-width: 0; }
+  .panel-head > div:first-child { flex: 1; min-width: 0; }
+  .panel-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
   .panel-head h2 { margin: 4px 0 2px; font: 600 18px var(--font-display); overflow-wrap: anywhere; }
   .totals { display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 10px 18px; border-bottom: 1px solid var(--hull-edge); font: 11px var(--font-data); color: var(--dim); }
   .totals b { display: block; font: 500 16px var(--font-data); color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -207,7 +209,10 @@
       <h2 id="panel-title"></h2>
       <div class="meta" id="panel-sub"></div>
     </div>
-    <button type="button" class="ghost small" id="panel-close" aria-label="Close the story">Close</button>
+    <div class="panel-actions">
+      <a class="go small" id="panel-editor" hidden>Continue in VS Code</a>
+      <button type="button" class="ghost small" id="panel-close" aria-label="Close the story">Close</button>
+    </div>
   </header>
   <div class="totals" id="panel-totals"></div>
   <div class="turns" id="panel-turns"></div>
@@ -228,7 +233,7 @@
   const quiet = (iso) => Boolean(iso) && Date.now() - Date.parse(iso) > QUIET_MS;
   const state = { sessions: [], pending: [], events: [], viewer: null, waitSeconds: 60, connected: false, busy: new Set() };
   // The open story: which session (and subagent), how many turns, and which turns are unfolded.
-  const panel = { id: null, helper: null, helperName: '', turns: TURNS_STEP, story: null, error: '', open: new Set(), auto: null, timer: 0 };
+  const panel = { id: null, helper: null, helperName: '', turns: TURNS_STEP, story: null, error: '', open: new Set(), auto: null, timer: 0, editor: null };
   let lastSessionsHTML = '';
   let toastTimer = 0;
 
@@ -416,7 +421,10 @@
 
   // -- the story panel --
   function openSession(id) {
-    if (panel.id !== id) Object.assign(panel, { helper: null, helperName: '', turns: TURNS_STEP, story: null, error: '', open: new Set(), auto: null });
+    if (panel.id !== id) {
+      Object.assign(panel, { helper: null, helperName: '', turns: TURNS_STEP, story: null, error: '', open: new Set(), auto: null, editor: null });
+      loadEditor(id);
+    }
     panel.id = id;
     $('panel').hidden = false;
     try { history.replaceState(null, '', `#session=${encodeURIComponent(id)}`); } catch { /* not remembered */ }
@@ -456,6 +464,26 @@
     renderPanelBody(mode);
   }
 
+  // Which VS Code window holds the session, so the button can bring it forward.
+  async function loadEditor(id) {
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/editor`);
+      if (res.ok && panel.id === id) panel.editor = await res.json();
+    } catch { /* no button */ }
+    if (panel.id === id) renderPanelHead();
+  }
+
+  // The link itself brings the right window forward, since a click may hand VS Code the focus;
+  // the hub then opens the conversation, which VS Code gives to the window now in front.
+  function continueInEditor() {
+    const id = panel.id;
+    if (!id || !panel.editor) return;
+    fetch(`/api/sessions/${encodeURIComponent(id)}/editor`, { method: 'POST' })
+      .then((res) => { if (!res.ok) toast(`The hub couldn't open it (${res.status}).`); })
+      .catch(() => toast("The hub isn't reachable."));
+    toast(`Opening the conversation in VS Code, in ${panel.editor.name}…`);
+  }
+
   // At most one refresh every couple of seconds while the session is busy.
   function refreshStorySoon() {
     if (panel.timer) return;
@@ -468,6 +496,12 @@
     $('panel-title').textContent = panel.helper ? panel.helperName || 'Subagent' : name;
     $('panel-sub').textContent = panel.helper ? `Subagent of ${name}` : session ? [...new Set([session.system, folder(session.cwd)])].concat(LABEL[session.status] ?? []).filter(Boolean).join(' · ') : '';
     $('panel-back').hidden = !panel.helper;
+    const editor = $('panel-editor');
+    editor.hidden = !panel.editor;
+    if (panel.editor) {
+      editor.href = panel.editor.link;
+      editor.title = `Opens this conversation in Claude Code, in the VS Code window for ${panel.editor.name}`;
+    }
   }
 
   function renderPanelBody(mode) {
@@ -582,6 +616,7 @@
     if (helperButton) return openHelper(helperButton.dataset.helper, helperButton.dataset.helperName);
   });
   $('panel-close').addEventListener('click', closePanel);
+  $('panel-editor').addEventListener('click', continueInEditor);
   $('panel-back').addEventListener('click', () => {
     Object.assign(panel, { helper: null, helperName: '', turns: TURNS_STEP, story: null, open: new Set(), auto: null });
     renderPanelHead();

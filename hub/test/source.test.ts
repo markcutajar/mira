@@ -48,6 +48,13 @@ describe('Claude Code source', () => {
     assert.equal(source.story?.(session(transcript), { turns: 30, helper: '../../etc' }), null);
   });
 
+  it('links a session to the Claude Code extension, by its UUID only', () => {
+    const id = '673391f2-21ec-4c16-b57b-8dadae724ac0';
+    assert.deepEqual(source.continueAt?.({ ...session(transcript), id, cwd: 'C:\\code\\mira' }), { folder: 'C:\\code\\mira', link: `vscode://anthropic.claude-code/open?session=${id}` });
+    assert.equal(source.continueAt?.({ ...session(transcript), id: 's-1&prompt=rm', cwd: 'C:\\code\\mira' }), null);
+    assert.equal(source.continueAt?.({ ...session(transcript), id }), null); // no folder known
+  });
+
   it('makes valid, repeatable UUIDs', () => {
     assert.equal(stableId('usage:s-1:p-1'), stableId('usage:s-1:p-1'));
     assert.notEqual(stableId('usage:s-1:p-1'), stableId('usage:s-1:p-2'));
