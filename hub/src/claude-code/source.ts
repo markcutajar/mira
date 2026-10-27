@@ -9,6 +9,7 @@ import { CONTRACT_VERSION, MiraEvent, type Actor } from '../../../contracts/src/
 import type { CostOf } from '../pricing.ts';
 import type { SourceAdapter } from '../sources.ts';
 import type { Place } from '../systems.ts';
+import { Inboxes, MAX_MESSAGE } from './inbox.ts';
 import { normalise } from './normalise.ts';
 import { activeSessions, helperAt, helpersOf, isInside, pastSessions, readStory, sessionTitle, turnsOf, writeTitle, type Turn } from './transcripts.ts';
 
@@ -18,6 +19,8 @@ export interface ClaudeCodeOptions {
   costOf: CostOf;
   /** How long after a turn ends to read its tokens, so the transcript has caught up. */
   usageDelayMs?: number;
+  /** Where to keep each running session's inbox between restarts (decision 46); in memory only without it. */
+  inboxFile?: string;
 }
 
 const SOURCE = 'claude-code';
@@ -26,6 +29,7 @@ const PROJECTS_KEPT = 1000;
 export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
   const { projectsDir, placeFor, costOf } = options;
   const delay = options.usageDelayMs ?? 2000;
+  const inboxes = new Inboxes(options.inboxFile);
   // Paths arrive in hook payloads, so only files under Claude Code's own folder are ever read.
   const inside = (file: string | undefined) => (file && isInside(projectsDir, file) ? file : undefined);
 
@@ -50,14 +54,20 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
     id: SOURCE,
 
     // A session belongs to the project it started in (decision 27). When its shell changes folder,
-    // the move is recorded under that project, not the folder it moved to.
-    ingest(payload, at) {
+    // the move is recorded under that project, not the folder it moved to. The hooks also pass on
+    // the session's inbox, for messages from Mira (decision 46).
+    ingest(payload, at, headers) {
       const sessionId = typeof payload.session_id === 'string' ? payload.session_id : '';
       const moved = payload.hook_event_name === 'CwdChanged';
       const cwd = typeof payload.cwd === 'string' ? payload.cwd : undefined;
       const known = projects.get(sessionId);
       const system = moved ? (known ?? placeFor(typeof payload.old_cwd === 'string' ? payload.old_cwd : cwd).system) : placeFor(cwd).system;
       if (!moved && sessionId) remember(sessionId, system);
+      // Claude Code closes the inbox before SessionEnd's hook runs, so that one names none.
+      const socket = headers?.['x-mira-inbox'];
+      const token = headers?.['x-mira-inbox-token'];
+      if (payload.hook_event_name === 'SessionEnd') inboxes.forget(sessionId);
+      else if (SESSION_ID.test(sessionId) && socket && token) inboxes.note(sessionId, socket, token, at);
       return normalise(payload, { at: at.toISOString(), system });
     },
 
@@ -118,6 +128,17 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
       const transcript = inside(session.transcript);
       if (!transcript || (helper && !/^[\w-]{1,80}$/.test(helper))) return null;
       return readStory(transcript, { costOf, turns, helper });
+    },
+
+    // Into the session's inbox, which it reads wherever it runs (decision 46).
+    canMessage(session) {
+      return session.status !== 'ended' && inboxes.has(session.id);
+    },
+
+    message(session, text) {
+      if (session.status === 'ended') return Promise.resolve('That session has ended. Carry it on in a terminal or in VS Code.');
+      if (!text.trim() || text.length > MAX_MESSAGE) return Promise.resolve(`A message is 1 to ${MAX_MESSAGE} characters.`);
+      return inboxes.send(session.id, text);
     },
 
     // The Claude Code extension opens a session in its chat panel from this link.

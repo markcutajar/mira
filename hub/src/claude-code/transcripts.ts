@@ -8,6 +8,7 @@ import type { Status } from '../../../contracts/src/index.ts';
 import { summarise } from '../permissions.ts';
 import type { CostOf, MessageTokens } from '../pricing.ts';
 import { addUsage, emptyUsage, type Story, type StoryHelper, type StoryStep, type StoryTurn, type UsageTotals } from '../sources.ts';
+import { SENDER } from './inbox.ts';
 
 export interface TranscriptSession {
   sessionId: string;
@@ -158,7 +159,8 @@ function readLastByte(file: string, size: number): number | undefined {
 type Step = { kind: 'text'; text: string } | { kind: 'tool'; id?: string; name: string; summary?: string };
 
 export type Entry =
-  | { kind: 'prompt'; at: string; promptId?: string; from: 'you' | 'agent'; text: string }
+  | { kind: 'prompt'; at: string; promptId?: string; from: 'you' | 'agent'; via?: 'mira'; text: string }
+  | { kind: 'aside'; at: string; text: string }
   | { kind: 'reply'; at: string; messageId: string; model?: string; steps: Step[]; tokens?: MessageTokens; stop?: string; failed: boolean }
   | { kind: 'result'; at: string; toolUseId: string; failed: boolean }
   | { kind: 'note'; at: string; text: string }
@@ -182,13 +184,29 @@ export function parseLines(text: string, sidechain = false): Entry[] {
   return entries;
 }
 
+// What I send from Mira arrives as a message from another session named Mira (decision 46): as a
+// prompt of its own when the session was idle, or read mid-turn when it was working.
+const fromMira = (origin: unknown) => (origin as Record<string, unknown> | undefined)?.kind === 'peer' && (origin as Record<string, unknown>).from === SENDER;
+const PEER_HEAD = /^Another Claude session sent a message[^\n]*:\n/;
+const PEER_TAIL = '\n\nThis came from another Claude session';
+
 function toEntries(raw: Record<string, unknown>, sidechain: boolean): Entry[] {
   const at = typeof raw.timestamp === 'string' ? raw.timestamp : undefined;
   if (!at || (!sidechain && raw.isSidechain === true)) return [];
   if (raw.type === 'system') return raw.subtype === 'compact_boundary' ? [{ kind: 'note', at, text: 'Conversation compacted' }] : [];
+  const attached = raw.type === 'attachment' ? (raw.attachment as Record<string, unknown> | undefined) : undefined;
+  if (attached?.type === 'queued_command' && fromMira(attached.origin) && typeof attached.prompt === 'string') {
+    return [{ kind: 'aside', at, text: clip(attached.prompt) }];
+  }
   const message = raw.message as Record<string, unknown> | undefined;
   if (!message) return [];
   if (raw.type === 'assistant') return [reply(raw, message, at)];
+  if (raw.type === 'user' && fromMira(raw.origin) && typeof message.content === 'string') {
+    const said = message.content.replace(PEER_HEAD, '');
+    const end = said.indexOf(PEER_TAIL);
+    const promptId = typeof raw.promptId === 'string' ? raw.promptId : undefined;
+    return [{ kind: 'prompt', at, promptId, from: 'you', via: 'mira', text: clip((end >= 0 ? said.slice(0, end) : said).trim()) }];
+  }
   if (raw.type !== 'user' || raw.isMeta === true || raw.isCompactSummary === true) return [];
 
   const content = message.content;
@@ -268,8 +286,8 @@ export function buildTurns(entries: Entry[], costOf: CostOf): Turn[] {
   const turns: Draft[] = [];
   const tools = new Map<string, Extract<Turn['steps'][number], { kind: 'tool' }>>();
   let turn: Draft | undefined;
-  const start = (at: string, from: 'you' | 'agent', id: string | undefined, prompt?: string): Draft => {
-    const draft: Draft = { id: id ?? `turn-${turns.length + 1}`, at, endedAt: at, from, prompt, steps: [], state: 'done', own: emptyUsage(), messages: new Map(), interrupted: false, failed: false };
+  const start = (at: string, from: 'you' | 'agent', id: string | undefined, prompt?: string, via?: 'mira'): Draft => {
+    const draft: Draft = { id: id ?? `turn-${turns.length + 1}`, at, endedAt: at, from, ...(via ? { via } : {}), prompt, steps: [], state: 'done', own: emptyUsage(), messages: new Map(), interrupted: false, failed: false };
     turns.push(draft);
     return draft;
   };
@@ -280,9 +298,13 @@ export function buildTurns(entries: Entry[], costOf: CostOf): Turn[] {
         turn.prompt = turn.prompt ? `${turn.prompt}\n\n${e.text}` : e.text;
         turn.endedAt = e.at;
       } else {
-        turn = start(e.at, e.from, e.promptId, e.text);
+        turn = start(e.at, e.from, e.promptId, e.text, e.via);
       }
       turn.last = e;
+      continue;
+    }
+    if (e.kind === 'aside' && !turn) {
+      turn = start(e.at, 'you', undefined, e.text, 'mira');
       continue;
     }
     turn ??= start(e.at, 'agent', undefined);
@@ -307,6 +329,8 @@ export function buildTurns(entries: Entry[], costOf: CostOf): Turn[] {
       turn.last = e;
     } else if (e.kind === 'note') {
       turn.steps.push({ kind: 'note', text: e.text });
+    } else if (e.kind === 'aside') {
+      turn.steps.push({ kind: 'message', text: e.text, via: 'mira' });
     } else {
       turn.interrupted = true;
       turn.last = e;

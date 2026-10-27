@@ -24,7 +24,7 @@ const store = new Store(join(miraHome, 'mira.db'));
 const placeFor = makePlaceResolver(config.systems);
 const roster = new Roster({ workingMs: config.quiet.workingMinutes * 60 * 1000, idleMs: config.quiet.idleHours * HOUR });
 const pidFile = join(miraHome, 'hub.pid');
-const sources: SourceAdapter[] = [claudeCode({ projectsDir: claudeProjects, placeFor, costOf: makeCostOf(config.prices) })];
+const sources: SourceAdapter[] = [claudeCode({ projectsDir: claudeProjects, placeFor, costOf: makeCostOf(config.prices), inboxFile: join(miraHome, 'inboxes.json') })];
 
 // Old events go once a day, keeping the per-turn token counts (decision 32).
 function prune() {

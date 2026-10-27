@@ -1,5 +1,6 @@
 // The story panel, shared by the board and the sky: one session turn by turn, read from its
-// transcript when opened, with any prompt it's waiting on and a way to carry on in VS Code.
+// transcript when opened, with any prompt it's waiting on, a box to message it wherever it runs
+// (decision 46), and ways to carry on in VS Code or a terminal.
 
 import type { MiraEvent } from '../../../contracts/src/index.ts';
 import type { Story, StoryStep, StoryTurn, UsageTotals } from '../../src/sources.ts';
@@ -63,6 +64,11 @@ export function createPanel(options: PanelOptions): Panel {
     <div data-prompt></div>
     <div class="totals" data-totals></div>
     <div class="turns" data-turns></div>
+    <form class="composer" data-composer hidden>
+      <textarea data-message rows="1" maxlength="20000" placeholder="Message this session…" aria-label="Message this session"></textarea>
+      <button type="submit" class="go small" data-send>Send</button>
+      <p class="hint" data-said role="status"></p>
+    </form>
     <div class="term-view" data-term hidden>
       <div class="term-bar"><span class="term-state" data-term-state></span><button type="button" class="ghost small" data-term-zoom="-1" title="Smaller text" aria-label="Smaller text">A−</button><button type="button" class="ghost small" data-term-zoom="1" title="Larger text" aria-label="Larger text">A+</button><button type="button" class="go small" data-term-start hidden>Resume here</button><button type="button" class="stop small" data-term-stop hidden>Stop</button></div>
       <div class="term-host" data-term-host></div>
@@ -87,7 +93,12 @@ export function createPanel(options: PanelOptions): Panel {
     terminal: { available: false, running: false },
     view: 'story' as 'story' | 'terminal',
     term: null as { id: string; view: TerminalView | null; state: TerminalState | null } | null,
+    // Messages (decision 46): what came of the last one sent, and whether one is on its way.
+    said: '',
+    sending: false,
   };
+  const message = root.querySelector('[data-message]') as HTMLTextAreaElement;
+  const drafts = new Map<string, string>();
 
   function reset(extra: Partial<typeof state> = {}) {
     Object.assign(state, { helper: null, helperName: '', turns: TURNS_STEP, story: null, error: '', open: new Set<string>(), auto: null }, extra);
@@ -96,7 +107,9 @@ export function createPanel(options: PanelOptions): Panel {
   function open(id: string) {
     if (state.id !== id) {
       closeTerminal();
-      reset({ editor: null, terminal: { available: false, running: false }, view: 'story' });
+      keepDraft();
+      reset({ editor: null, terminal: { available: false, running: false }, view: 'story', said: '' });
+      message.value = drafts.get(id) ?? '';
       void loadEditor(id);
       void loadTerminal(id);
     }
@@ -110,6 +123,7 @@ export function createPanel(options: PanelOptions): Panel {
 
   function close() {
     closeTerminal();
+    keepDraft();
     state.view = 'story';
     clearTimeout(state.timer);
     Object.assign(state, { id: null, helper: null, story: null, timer: 0 });
@@ -218,6 +232,55 @@ export function createPanel(options: PanelOptions): Panel {
     $('term-stop').hidden = !t?.connected || !t.running;
   }
 
+  // A message for the session, sent to it wherever it runs (decision 46). An unsent one is kept
+  // while I look at other sessions.
+  function keepDraft() {
+    if (!state.id) return;
+    if (message.value.trim()) drafts.set(state.id, message.value);
+    else drafts.delete(state.id);
+  }
+
+  async function send() {
+    const id = state.id;
+    const text = message.value.trim();
+    if (!id || !text || state.sending) return;
+    Object.assign(state, { sending: true, said: 'Sending…' });
+    refresh();
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+      if (res.ok) {
+        drafts.delete(id);
+        if (state.id === id) message.value = '';
+        state.said = 'Sent. It shows in the session as a message from Mira, and the reply comes in here.';
+        window.setTimeout(() => { if (state.id === id) void load('first'); }, 1500);
+      } else {
+        state.said = (await res.text()) || `The hub couldn't send it (${res.status}).`;
+      }
+    } catch {
+      state.said = "The hub isn't reachable, so it wasn't sent.";
+    }
+    state.sending = false;
+    if (state.id === id) refresh();
+    fit();
+  }
+
+  // The box grows with what I write, up to a limit the stylesheet sets.
+  function fit() {
+    message.style.height = 'auto';
+    message.style.height = `${message.scrollHeight + 4}px`;
+  }
+
+  function renderComposer(session: BoardSession | undefined) {
+    const live = Boolean(session?.status && session.status !== 'ended');
+    const can = Boolean(session?.canMessage);
+    $('composer').hidden = !live || Boolean(state.helper) || state.view !== 'story';
+    message.disabled = !can;
+    ($('send') as HTMLButtonElement).disabled = !can || state.sending;
+    $('said').textContent = state.said || (can
+      ? 'Enter sends it, Shift+Enter starts a new line. It reaches the session wherever it runs, VS Code included.'
+      : "Mira can message this session once Claude Code's hooks pass on its inbox: see hub/README.md.");
+  }
+
   // At most one refresh every couple of seconds while the session is busy.
   function event(e: MiraEvent) {
     if (!state.id || (e.actor.id !== state.id && e.actor.parent !== state.id) || state.timer) return;
@@ -248,6 +311,7 @@ export function createPanel(options: PanelOptions): Panel {
       editor.href = state.editor.link;
       editor.title = `Opens this conversation in Claude Code, in the VS Code window for ${state.editor.name}`;
     }
+    renderComposer(session);
     renderPrompt();
   }
 
@@ -329,7 +393,7 @@ export function createPanel(options: PanelOptions): Panel {
       <button type="button" class="turn-head" data-turn="${esc(t.id)}" aria-expanded="${unfolded}">
         <span class="t">${esc(when(t.at))}</span><span class="turn-prompt">${esc(first)}</span><span class="turn-meta">${badge}${esc(meta)}</span>
       </button>
-      ${unfolded ? `<div class="turn-body">${t.prompt ? `<p class="you">${esc(t.prompt)}</p>` : ''}${t.steps.map(stepHTML).join('')}</div>` : ''}
+      ${unfolded ? `<div class="turn-body">${t.prompt ? `<p class="you"${t.via ? ' data-via="mira"' : ''}>${esc(t.prompt)}</p>` : ''}${t.steps.map(stepHTML).join('')}</div>` : ''}
     </article>`;
   }
 
@@ -337,6 +401,7 @@ export function createPanel(options: PanelOptions): Panel {
     const render = markdown();
     if (s.kind === 'text') return render ? `<div class="reply md">${render(s.text)}</div>` : `<p class="reply">${esc(s.text)}</p>`;
     if (s.kind === 'note') return `<p class="note">${esc(s.text)}</p>`;
+    if (s.kind === 'message') return `<p class="you" data-via="mira">${esc(s.text)}</p>`;
     const line = `<div class="tool${s.failed ? ' failed' : ''}"><span class="tool-name">${esc(s.name)}</span>${s.summary ? `<span class="tool-sum" title="${esc(s.summary)}">${esc(s.summary)}</span>` : ''}${s.failed ? '<span class="failed-tag">failed</span>' : ''}</div>`;
     const h = s.helper;
     if (!h) return line;
@@ -385,9 +450,27 @@ export function createPanel(options: PanelOptions): Panel {
       void load('first');
     }
   });
+  root.addEventListener('submit', (e) => {
+    e.preventDefault();
+    void send();
+  });
+  message.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      void send();
+    }
+  });
+  message.addEventListener('input', () => {
+    if (state.said && !state.sending) {
+      state.said = '';
+      renderComposer(state.id ? options.session(state.id) : undefined);
+    }
+    fit();
+  });
   document.addEventListener('keydown', (e) => {
-    // Escape inside the terminal belongs to the program (Claude Code uses it to interrupt).
-    if (e.key === 'Escape' && state.id && !(e.target as HTMLElement | null)?.closest?.('.term-host')) close();
+    // Escape inside the terminal belongs to the program (Claude Code uses it to interrupt), and in
+    // the message box it would lose what I'm writing.
+    if (e.key === 'Escape' && state.id && !(e.target as HTMLElement | null)?.closest?.('.term-host, .composer')) close();
   });
 
   return { open, close, current: () => state.id, refresh, event };

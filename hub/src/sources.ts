@@ -39,7 +39,9 @@ export interface StoryHelper {
 export type StoryStep =
   | { kind: 'text'; text: string }
   | { kind: 'tool'; name: string; summary?: string; failed?: boolean; helper?: StoryHelper }
-  | { kind: 'note'; text: string };
+  | { kind: 'note'; text: string }
+  /** A message I sent while it worked, which it read between tools (decision 46). */
+  | { kind: 'message'; text: string; via: 'mira' };
 
 export interface StoryTurn {
   id: string;
@@ -47,6 +49,8 @@ export interface StoryTurn {
   endedAt: string;
   /** Who started the turn: me, or the agent itself, for example when a background task finished. */
   from: 'you' | 'agent';
+  /** Where I wrote it, when not in the session itself: Mira, for a message sent from its story (decision 46). */
+  via?: 'mira';
   prompt?: string;
   steps: StoryStep[];
   state: 'running' | 'done' | 'interrupted' | 'failed';
@@ -85,8 +89,8 @@ export interface PastSession extends FoundSession {
 export interface SourceAdapter {
   /** The source's ID, as in `/ingest/<id>` and the envelope's `source`. */
   id: string;
-  /** Turns one payload sent to `/ingest/<id>` into an event, at the time it fired. */
-  ingest?(payload: Record<string, unknown>, at: Date): MiraEvent | null;
+  /** Turns one payload sent to `/ingest/<id>` into an event, at the time it fired; `headers` are the request's, in lower case. */
+  ingest?(payload: Record<string, unknown>, at: Date, headers?: Record<string, string | undefined>): MiraEvent | null;
   /** Sessions active since `sinceMs`, for the picture at startup. */
   discover?(sinceMs: number): FoundSession[];
   /** Every earlier session the source still keeps, for the board's history; read when asked, never stored. */
@@ -107,6 +111,10 @@ export interface SourceAdapter {
   startAt?(folder: string, prompt?: string): { link: string } | null;
   /** The command that carries a session on in a terminal the page shows (decision 36). */
   terminalFor?(session: SessionView): TerminalSpec | null;
+  /** True when Mira can send this running session a message (decision 46). */
+  canMessage?(session: SessionView): boolean;
+  /** Sends a running session my message, wherever it runs; resolves to why not, or null once it's delivered. */
+  message?(session: SessionView, text: string): Promise<string | null>;
 }
 
 export const emptyUsage = (): UsageTotals => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 });

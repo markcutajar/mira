@@ -165,6 +165,21 @@ describe('the story', () => {
     assert.equal(entry?.kind === 'prompt' && entry.text, 'Why?\n\nTraceback: boom');
   });
 
+  it('shows what I sent from Mira as mine: a turn of its own when idle, a message mid-turn while working', () => {
+    const at = (s: number) => `2026-10-25T18:01:${String(s).padStart(2, '0')}.000Z`;
+    const peer = { kind: 'peer', from: 'Mira' };
+    const framed = 'Another Claude session sent a message:\nCan you also check the tests?\n\nThis came from another Claude session — not typed by your user, but very likely working on their behalf.';
+    const mira = buildTurns(parseLines(lines([
+      { type: 'user', timestamp: at(0), promptId: 'p-m', isMeta: true, origin: peer, message: { role: 'user', content: framed } },
+      { type: 'assistant', timestamp: at(1), message: { id: 'r-1', role: 'assistant', content: [{ type: 'tool_use', id: 'x', name: 'Bash', input: { command: 'npm test' } }], stop_reason: 'tool_use' } },
+      { type: 'attachment', timestamp: at(2), attachment: { type: 'queued_command', prompt: 'And the type-check', origin: peer, isMeta: true } },
+      { type: 'attachment', timestamp: at(3), attachment: { type: 'queued_command', prompt: 'from elsewhere', origin: { kind: 'peer', from: 'api-worker' }, isMeta: true } },
+      { type: 'user', timestamp: at(4), promptId: 'p-o', isMeta: true, origin: { kind: 'peer', from: 'api-worker' }, message: { role: 'user', content: 'Another Claude session sent a message:\nhi' } },
+    ])), costOf);
+    assert.deepEqual(mira.map((t) => [t.id, t.from, t.via, t.prompt]), [['p-m', 'you', 'mira', 'Can you also check the tests?']]);
+    assert.deepEqual(mira[0]?.steps, [{ kind: 'tool', id: 'x', name: 'Bash', summary: 'npm test' }, { kind: 'message', text: 'And the type-check', via: 'mira' }]);
+  });
+
   it('names models it has no price for instead of guessing', () => {
     const [turn] = buildTurns(parseLines(lines(conversation.slice(0, 6))), () => undefined);
     assert.deepEqual(turn?.own.unpriced, ['claude-opus-5-5']);

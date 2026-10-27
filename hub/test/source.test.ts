@@ -94,6 +94,20 @@ describe('Claude Code source', () => {
     assert.equal(source.rename?.({ ...session(join(dir, 'project', '99999999-2222-4333-8444-555555555555.jsonl')), id: '99999999-2222-4333-8444-555555555555' }, 'x'), false); // no transcript yet
   });
 
+  it("learns a running session's inbox from its hooks, and forgets it when the session ends", async () => {
+    const id = '0b2c1d4e-5f60-4718-9a2b-3c4d5e6f7a8b';
+    const running: SessionView = { ...session(transcript), id };
+    const inbox = { 'x-mira-inbox': '\\\\.\\pipe\\LOCAL\\cc-msg-0337493ba7fe34ce95f7a8621dad6624', 'x-mira-inbox-token': 'f'.repeat(32) };
+    assert.equal(source.canMessage?.(running), false);
+    source.ingest?.({ hook_event_name: 'UserPromptSubmit', session_id: id, cwd: 'C:\\code\\mira' }, new Date(), inbox);
+    assert.equal(source.canMessage?.(running), true);
+    assert.equal(source.canMessage?.({ ...running, status: 'ended' }), false);
+    assert.match((await source.message?.(running, '')) ?? '', /1 to 20000 characters/);
+    // Claude Code has closed the inbox by the time SessionEnd's hook runs, so that one names none.
+    source.ingest?.({ hook_event_name: 'SessionEnd', session_id: id, cwd: 'C:\\code\\mira', reason: 'other' }, new Date(), { 'x-mira-inbox': '', 'x-mira-inbox-token': '' });
+    assert.equal(source.canMessage?.(running), false);
+  });
+
   it('makes valid, repeatable UUIDs', () => {
     assert.equal(stableId('usage:s-1:p-1'), stableId('usage:s-1:p-1'));
     assert.notEqual(stableId('usage:s-1:p-1'), stableId('usage:s-1:p-2'));

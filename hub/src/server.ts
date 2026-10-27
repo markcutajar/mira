@@ -79,7 +79,12 @@ export function createHub(options: HubOptions) {
 
   const sessions = () => roster.snapshot()
     .filter((s) => !gone('session', s.id, s.lastAt) && !gone('system', s.system, s.lastAt))
-    .map((s) => ({ ...s, title: names.session[s.id] ?? sources.get(s.source)?.title?.(s), worktree: options.placeFor(s.cwd).worktree }));
+    .map((s) => ({
+      ...s,
+      title: names.session[s.id] ?? sources.get(s.source)?.title?.(s),
+      worktree: options.placeFor(s.cwd).worktree,
+      ...(sources.get(s.source)?.canMessage?.(s) ? { canMessage: true } : {}),
+    }));
 
   // A session on the board, or an earlier one a source still keeps (decision 40), which then joins
   // the roster so its story, terminal and editor work like any other's.
@@ -136,7 +141,8 @@ export function createHub(options: HubOptions) {
     const payload = parseObject(body);
     if (!body || !payload) return;
     options.recordShape?.(source.id, payload, body.length);
-    record(source.ingest?.(payload, hookTime(req)) ?? null);
+    const headers = Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]));
+    record(source.ingest?.(payload, hookTime(req), headers) ?? null);
   }
 
   async function permission(req: IncomingMessage, res: ServerResponse) {
@@ -216,6 +222,21 @@ export function createHub(options: HubOptions) {
     if (req.method === 'GET') return json(res, target);
     setTimeout(() => options.editor?.open(at.link), options.editorDelayMs ?? EDITOR_DELAY_MS).unref();
     res.writeHead(204).end();
+  }
+
+  // POST { text } sends a running session my message, wherever it runs (decision 46). It answers once
+  // the session's inbox has it; the reply arrives as the session's events and story.
+  async function message(req: IncomingMessage, res: ServerResponse, id: string) {
+    const session = sessionById(id);
+    const source = session ? sources.get(session.source) : undefined;
+    if (!session || !source?.message) return reply(res, 404, "Mira can't send that session a message.");
+    const body = parseObject(await readBody(req));
+    const text = typeof body?.text === 'string' ? body.text.replace(/\r\n?/g, '\n').trim() : '';
+    if (!text) return reply(res, 400, 'Expected { text }.');
+    const failed = await source.message(session, text);
+    if (failed) return reply(res, 409, failed);
+    res.writeHead(204).end();
+    broadcast('sessions', sessions());
   }
 
   // A project's own folder: the root of its most recent live session, else of the folders its
@@ -304,6 +325,7 @@ export function createHub(options: HubOptions) {
     const storyOf = req.method === 'GET' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/story$/)?.[1] : undefined;
     const terminalOf = req.method === 'GET' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/terminal$/)?.[1] : undefined;
     const editorOf = req.method === 'GET' || req.method === 'POST' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/editor$/)?.[1] : undefined;
+    const messageTo = req.method === 'POST' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/message$/)?.[1] : undefined;
     const manage = req.method === 'PUT' || req.method === 'POST' ? url.pathname.match(/^\/api\/(names|remove)\/(system|session)\/([^/]{1,240})$/) : null;
     const startOf = req.method === 'GET' || req.method === 'POST' ? url.pathname.match(/^\/api\/systems\/([^/]{1,240})\/start$/)?.[1] : undefined;
     const historyOf = req.method === 'GET' ? url.pathname.match(/^\/api\/systems\/([^/]{1,240})\/history$/)?.[1] : undefined;
@@ -315,6 +337,7 @@ export function createHub(options: HubOptions) {
     if (storyOf) return story(res, storyOf, url);
     if (terminalOf) return void terminal(res, terminalOf);
     if (editorOf) return editor(req, res, editorOf);
+    if (messageTo) return void message(req, res, messageTo);
     if (startOf) return void startIn(req, res, decodeName(startOf));
     if (historyOf) return history(res, decodeName(historyOf), url);
     if (route === 'GET /api/stream') return stream(req, res, url);

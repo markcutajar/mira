@@ -20,9 +20,17 @@ const WAITS = "process.stdout.write('ready'); process.stdin.on('data', (d) => { 
 
 // A stand-in for Claude Code, so these tests cover the hub and not transcript reading.
 const given = new Map<string, string>();
+// Inboxes the hooks named (decision 46), and the messages sent into them.
+const inboxes = new Set<string>();
+const sent: Array<[string, string]> = [];
 const claude: SourceAdapter = {
   id: 'claude-code',
-  ingest: (payload, at) => normalise(payload, { at: at.toISOString(), system: 'mira' }),
+  ingest: (payload, at, headers) => {
+    if (headers?.['x-mira-inbox']) inboxes.add(String(payload.session_id));
+    return normalise(payload, { at: at.toISOString(), system: 'mira' });
+  },
+  canMessage: (s) => inboxes.has(s.id),
+  message: async (s, text) => (inboxes.has(s.id) ? (sent.push([s.id, text]), null) : "Mira doesn't know its inbox."),
   title: (s) => given.get(s.id) ?? (s.transcript ? 'Hub work' : undefined),
   rename: (s, name) => (s.transcript ? Boolean(given.set(s.id, name)) : false),
   story: (s, { helper }) => (s.transcript ? { sessionId: s.id, helperId: helper, usage: emptyUsage(), turns: [], earlier: 0 } : null),
@@ -242,6 +250,21 @@ describe('hub server', () => {
       before.close();
       after.close();
     }
+  });
+
+  it('sends a running session my message through the inbox its hooks named', async () => {
+    await post('/ingest/claude-code', { hook_event_name: 'UserPromptSubmit', session_id: 's-msg', cwd: 'C:\\code\\mira' }, { 'X-Mira-Inbox': '\\\\.\\pipe\\cc-msg-0337493ba7fe34ce95f7a8621dad6624', 'X-Mira-Inbox-Token': 'a'.repeat(32) });
+    await post('/ingest/claude-code', { hook_event_name: 'UserPromptSubmit', session_id: 's-quiet', cwd: 'C:\\code\\mira' });
+    const listed = ((await (await fetch(`${base}/api/sessions`)).json()) as { sessions: Array<{ id: string; canMessage?: boolean }> }).sessions;
+    assert.equal(listed.find((s) => s.id === 's-msg')?.canMessage, true);
+    assert.equal(listed.find((s) => s.id === 's-quiet')?.canMessage, undefined);
+    assert.equal((await post('/api/sessions/s-msg/message', { text: '  Also check the tests\r\n ' })).status, 204);
+    assert.deepEqual(sent.at(-1), ['s-msg', 'Also check the tests']);
+    const refused = await post('/api/sessions/s-quiet/message', { text: 'hello' });
+    assert.deepEqual([refused.status, await refused.text()], [409, "Mira doesn't know its inbox."]);
+    assert.equal((await post('/api/sessions/s-msg/message', { text: '   ' })).status, 400);
+    assert.equal((await post('/api/sessions/nobody/message', { text: 'hello' })).status, 404);
+    assert.equal((await post('/api/sessions/s-msg/message', { text: 'hello' }, { Origin: 'https://evil.example' })).status, 403);
   });
 
   it('starts a new session in a project, with the prompt typed in for me', async () => {
