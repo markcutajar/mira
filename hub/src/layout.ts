@@ -1,21 +1,23 @@
 // Build mode's layouts (decision 39): how I arranged each project's section of the island, kept by
-// the hub so every browser shows the same island. Places are on the section's own ground, 1 to 8
-// across and down, so a layout follows its section wherever the island puts it.
+// the hub so every browser shows the same island. Places are counted from the section's corner, so a
+// layout follows its section wherever the island puts it: its own ground is 1 to 8 across and down,
+// its shore 0 and 9, and the coast and streams around it reach three tiles further (decision 44).
 
 import { z } from 'zod';
 
-const Place = z.string().regex(/^[1-8],[1-8]$/);
+const Place = z.string().regex(/^(-[1-3]|\d|1[0-2]),(-[1-3]|\d|1[0-2])$/);
 /** A building, by its place in its template's order. */
 const Building = z.string().regex(/^\d{1,2}$/);
+/** Buildings stay on their section's own ground. */
 const Coordinate = z.number().int().min(1).max(8);
 
 export const SectionLayout = z.strictObject({
-  /** Ground painted as path or grass. */
-  ground: z.record(Place, z.enum(['p', 'g'])).optional(),
+  /** Ground painted as path, grass or flowers. */
+  ground: z.record(Place, z.enum(['p', 'g', 'f'])).optional(),
   /** Plants and decorations, by kind; the page ignores kinds it doesn't know. */
   placed: z.record(Place, z.string().regex(/^[a-z][a-z-]{0,23}$/)).optional(),
-  /** Trees the template planted that I took away. */
-  removed: z.array(Place).max(64).optional(),
+  /** Trees the island planted that I took away. */
+  removed: z.array(Place).max(256).optional(),
   /** Buildings moved to another place in their section. */
   moved: z.record(Building, z.tuple([Coordinate, Coordinate])).optional(),
   /** House styles chosen. */

@@ -512,6 +512,153 @@ export function drawnArt(): Art {
     }
   }
 
+  /** Paints every pixel of a shape: its outline in `edge`, the rest from `fill`. */
+  function blob(ctx: Ctx, w: number, h: number, inside: (x: number, y: number) => boolean, fill: (x: number, y: number) => string, edge: string) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (!inside(x, y)) continue;
+        rect(ctx, !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1) ? edge : fill(x, y), x, y, 1, 1);
+      }
+    }
+  }
+
+  // More to place anywhere on the island, and on its water (decision 44).
+  function outdoors() {
+    const pineRnd = mulberry32(91);
+    canvasTex(names.item('pine'), 20, 34, (ctx) => {
+      rect(ctx, '#6b4423', 9, 26, 3, 7);
+      rect(ctx, '#4f311a', 11, 26, 1, 7);
+      rect(ctx, '#6b4423', 8, 32, 5, 2);
+      const tiers: Array<[number, number, number]> = [[1, 10, 4.5], [7, 11, 7], [13, 14, 9.4]];
+      const inside = (x: number, y: number) => tiers.some(([y0, th, hw]) => y >= y0 && y < y0 + th && Math.abs(x + 0.5 - 10) <= 0.8 + (hw * (y - y0 + 1)) / th);
+      blob(ctx, 20, 34, inside, (x, y) => {
+        const light = (x - 10) / 20 + pineRnd() * 0.15 + (y % 6) / 30;
+        return light < -0.05 ? '#4f9f5c' : light < 0.2 ? '#2f7a45' : '#225c36';
+      }, '#173f27');
+    });
+
+    canvasTex(names.item('sunflowers'), 16, 24, (ctx) => {
+      for (const [x, top] of [[3, 9], [8, 4], [13, 8]] as Array<[number, number]>) {
+        rect(ctx, '#3f8530', x, top + 2, 1, 24 - top - 2);
+        rect(ctx, '#4f9a3c', x - 2, top + 8, 2, 1);
+        rect(ctx, '#4f9a3c', x + 1, top + 11, 2, 1);
+        const head = (px: number, py: number) => Math.hypot(px + 0.5 - (x + 0.5), py + 0.5 - (top + 1.5)) <= 3;
+        blob(ctx, 16, 24, head, (px, py) => (Math.hypot(px - x, py - top - 1) <= 1.2 ? '#6b4423' : px + py < x + top + 1 ? '#ffe08a' : '#ffcf3f'), '#b07d12');
+      }
+    });
+
+    canvasTex(names.item('mushrooms'), 16, 12, (ctx) => {
+      for (const [cx, capY, r] of [[10, 4, 4], [4, 6, 3], [13, 8, 2.5]] as Array<[number, number, number]>) {
+        rect(ctx, '#efe6d2', cx - 1, capY, 2, 11 - capY);
+        rect(ctx, '#cfc3a8', cx, capY, 1, 11 - capY);
+        const cap = (x: number, y: number) => y <= capY && ((x + 0.5 - cx) / r) ** 2 + ((y + 0.5 - capY) / (r * 0.85)) ** 2 <= 1;
+        blob(ctx, 16, 12, cap, (x, y) => (noise(x, y) < 0.18 ? '#fff7ec' : '#e04b3a'), '#7a2018');
+      }
+    });
+
+    const rockRnd = mulberry32(17);
+    canvasTex(names.item('rock'), 22, 14, (ctx) => {
+      const inside = (x: number, y: number) => ((x + 0.5 - 11) / 10) ** 2 + ((y + 0.5 - 8.5) / 5.5) ** 2 <= 1 || ((x + 0.5 - 14) / 5.5) ** 2 + ((y + 0.5 - 5.5) / 4.5) ** 2 <= 1;
+      blob(ctx, 22, 14, inside, (x, y) => {
+        if (y < 6 && rockRnd() < 0.35) return '#5aad46';
+        const light = (x + y) / 36 + rockRnd() * 0.1;
+        return light < 0.35 ? '#b4b5c0' : light < 0.6 ? '#8e8f9a' : '#6a6b76';
+      }, '#3b3b45');
+    });
+
+    // Two crates, a small one on a big one.
+    const crate = { hw: 5 * A, wall: 7 * A, small: 3.5 * A, smallWall: 5 * A };
+    const crateW = crate.hw * 2 + 2;
+    const crateH = crate.wall + crate.smallWall + crate.hw + 2;
+    anchors.set(names.item('crates'), { ox: (crate.hw + 1) / crateW, oy: (crateH - crate.hw / 2 - 1) / crateH, height: crateH - crate.hw / 2 - 1 });
+    canvasTex(names.item('crates'), crateW, crateH, (ctx) => {
+      const cx = crate.hw + 1;
+      const gy = crateH - crate.hw / 2 - 1;
+      for (const [hw, wall, y] of [[crate.hw, crate.wall, gy], [crate.small, crate.smallWall, gy - crate.wall]] as Array<[number, number, number]>) {
+        isoBlock(ctx, cx, y, hw, wall, '#a8744a', '#86592f', '#c48a58');
+        const bottoms = bottomsFor(cx, y, hw);
+        for (let x = cx - hw; x < cx + hw; x++) rect(ctx, '#6b4423', x, (bottoms[x] ?? 0) - Math.floor(wall / 2), 1, 1);
+        rect(ctx, '#6b4423', cx, y - wall - hw / 2 + 1, 1, hw);
+      }
+    });
+
+    // A stone well with a little roof and a bucket.
+    const well = { hw: 7 * A, wall: 5 * A, post: 15 * A, roof: 5 * A };
+    const wellW = well.hw * 2 + 2;
+    const wellH = well.hw / 2 + 2 + well.wall + well.post + well.roof + 1;
+    const wellGy = wellH - well.hw / 2 - 1;
+    const roofTop = wellGy - well.wall - well.post - well.roof;
+    anchors.set(names.item('well'), { ox: (well.hw + 1) / wellW, oy: wellGy / wellH, height: wellGy - roofTop });
+    canvasTex(names.item('well'), wellW, wellH, (ctx) => {
+      const cx = well.hw + 1;
+      const top = wellGy - well.wall;
+      const postTop = top - well.post;
+      isoBlock(ctx, cx, wellGy, well.hw, well.wall, '#9ea1ae', '#7d808c', '#c9cbd6');
+      diamond(ctx, '#2c5ea0', cx, top, well.hw - 2 * A);
+      diamond(ctx, '#3d7fd1', cx, top + A, well.hw - 4 * A);
+      for (const x of [cx - well.hw + A, cx + well.hw - 2 * A]) rect(ctx, '#6b4423', x, postTop, A, well.post + A);
+      rect(ctx, '#4a2e1c', cx - well.hw + 2 * A, postTop + 3 * A, well.hw * 2 - 4 * A, A);
+      rect(ctx, '#d0c8b0', cx, postTop + 4 * A, 1, 5 * A);
+      rect(ctx, '#8a5a32', cx - A, postTop + 9 * A, 2 * A + 1, 2 * A);
+      for (let i = 0; i < well.roof; i++) {
+        const half = Math.round(((i + 1) / well.roof) * (well.hw + A));
+        rect(ctx, i === well.roof - 1 ? '#7a2018' : i % 3 === 0 ? '#c4473a' : '#a83a2c', cx - half, roofTop + i, half * 2, 1);
+      }
+    });
+
+    canvasTex(names.item('campfire'), 20, 22, (ctx) => {
+      blob(ctx, 20, 22, (x, y) => ((x + 0.5 - 10) / 9.5) ** 2 + ((y + 0.5 - 12) / 10) ** 2 <= 1, () => 'rgba(255,170,60,0.16)', 'rgba(255,170,60,0.08)');
+      for (let y = 0; y < 22; y++) {
+        for (let x = 0; x < 20; x++) {
+          const d = ((x + 0.5 - 10) / 8) ** 2 + ((y + 0.5 - 18.5) / 3.2) ** 2;
+          if (d <= 1 && d >= 0.45) rect(ctx, (x + y) % 3 === 0 ? '#6f6f7a' : '#8e8e98', x, y, 1, 1);
+        }
+      }
+      line(ctx, '#6b4423', 5, 19, 14, 15, 2);
+      line(ctx, '#8a5a32', 6, 15, 15, 19, 2);
+      const half = (y: number) => { const f = (y - 3) / 14; return f < 0 || f > 1 ? -1 : 5.5 * Math.sin(Math.PI * Math.min(f, 0.75) * 0.9) * Math.pow(f, 0.35); };
+      for (const [scale, from, color] of [[1, 3, '#e04b3a'], [0.68, 7, '#ff8a3d'], [0.4, 10, '#ffd34d'], [0.18, 12, '#fff3b0']] as Array<[number, number, string]>) {
+        for (let y = from; y <= 17; y++) for (let x = 0; x < 20; x++) if (Math.abs(x + 0.5 - 10) <= half(y) * scale) rect(ctx, color, x, y, 1, 1);
+      }
+    });
+
+    // Lily pads lie flat on the water, centred on their tile.
+    anchors.set(names.item('lilies'), { ox: 0.5, oy: 0.55, height: 0 });
+    canvasTex(names.item('lilies'), 30, 14, (ctx) => {
+      for (const [cx, cy, rx, ry] of [[8, 6, 5, 2.6], [19, 4, 4, 2.1], [21, 10, 5.5, 2.8], [10, 11, 3.5, 1.8]] as Array<[number, number, number, number]>) {
+        const pad = (x: number, y: number) => {
+          const dx = x + 0.5 - cx;
+          const dy = y + 0.5 - cy;
+          return (dx / rx) ** 2 + (dy / ry) ** 2 <= 1 && !(dx > 0 && Math.abs(dy) < dx * 0.35); // a notch on its right
+        };
+        blob(ctx, 30, 14, pad, (x, y) => (x - cx + (y - cy) * 2 < -1 ? '#6cc455' : '#4f9a3c'), '#2d6b2b');
+      }
+      rect(ctx, '#ff9ec7', 18, 9, 3, 2);
+      rect(ctx, '#ffd0e4', 19, 8, 1, 1);
+      rect(ctx, '#ffd34d', 19, 9, 1, 1);
+    });
+
+    // A rowing boat lying along the columns: its hull a lens on the ground's plane, its side below the rim.
+    anchors.set(names.item('boat'), { ox: 0.5, oy: 10.5 / 24, height: 0 });
+    canvasTex(names.item('boat'), 36, 24, (ctx) => {
+      const lens = (x: number, y: number, down: number, a: number, b: number) => {
+        const dx = x + 0.5 - 18;
+        const dy = y + 0.5 - 10 - down;
+        const along = dy + dx / 2;
+        const across = dy - dx / 2;
+        return Math.abs(along) <= a && Math.abs(across) <= b * (1 - (along / a) ** 2);
+      };
+      blob(ctx, 36, 24, (x, y) => lens(x, y, 5, 12, 4.5), () => 'rgba(20,40,80,0.35)', 'rgba(20,40,80,0.2)');
+      blob(ctx, 36, 24, (x, y) => lens(x, y, 3, 12, 4.5) || lens(x, y, 1.5, 12, 4.5), (x) => (x < 18 ? '#6b4423' : '#55361d'), '#3a2414');
+      blob(ctx, 36, 24, (x, y) => lens(x, y, 0, 12, 4.5), (x, y) => {
+        if (!lens(x, y, 0, 10, 3)) return '#8a5a32';
+        const dx = x + 0.5 - 18;
+        const along = y + 0.5 - 10 + dx / 2;
+        return Math.abs(along) < 1.2 ? '#6b4423' : '#c48a58';
+      }, '#3a2414');
+    });
+  }
+
   function tiles() {
     const rnd = mulberry32(1234 + A);
     const tufts = (ctx: Ctx) => {
@@ -653,6 +800,7 @@ export function drawnArt(): Art {
       });
       buildings();
       decorations();
+      outdoors();
       waterworks();
       playground();
       ring();

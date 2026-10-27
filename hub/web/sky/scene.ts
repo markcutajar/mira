@@ -5,7 +5,7 @@
 import type { MiraEvent } from '../../../contracts/src/index.ts';
 import { sessionLabel, type BoardSession } from '../shared/format.ts';
 import { ACCENT_COLOUR, ACCENTS, MAX_LEVEL, names, WATERFALL_FRAMES, type Accent, type Art, type Decoration, type Edge, type HouseStyle, type Palette } from './art.ts';
-import { arrange, BUILDING_LABEL, edit, isItem, ITEMS, move, placeOf, restyle, sameLayouts, type ItemKind, type Outcome, type Placed, type SectionLayout, type Tool } from './build.ts';
+import { arrange, BUILDING_LABEL, edit, isItem, ITEMS, move, onWater, placeOf, restyle, sameLayouts, type ItemKind, type Outcome, type Placed, type SectionLayout, type Tool, type Where } from './build.ts';
 import { findPath, generateCells, hash, SEC, sectionOrigin, spotsAround, type BuildingType, type Cell, type Spot, type Template } from './world.ts';
 
 type Status = 'working' | 'needs-me' | 'my-turn' | 'failed' | 'ended';
@@ -129,16 +129,18 @@ export interface SkyOptions {
   onBuildHint?(text: string): void;
 }
 
-/** A tile of a section's own ground, inside its shore, as build mode sees it. */
+/** A tile of the island as build mode sees it: whose layout it's in, and where. */
 interface Target {
   sec: Section;
-  place: string;
+  where: Where;
   cell: Cell;
   building?: Building;
 }
 
-// Where a placed picture stands on its tile, in art pixels below the tile's centre.
-const ITEM_DROP: Partial<Record<ItemKind, number>> = { tree: 3, 'tree-apple': 3, shrub: 2, lamp: 2, bench: 3 };
+// Where a placed picture stands on its tile, in art pixels below the tile's centre. Lily pads lie
+// flat on the water, under anything that floats by.
+const ITEM_DROP: Partial<Record<ItemKind, number>> = { tree: 3, 'tree-apple': 3, pine: 3, shrub: 2, lamp: 2, bench: 3, sunflowers: 2, mushrooms: 2, rock: 2, campfire: 2 };
+const FLAT = new Set<ItemKind>(['lilies']);
 const buildingIndex = (b: Building) => Number(b.id.split(':')[1]);
 
 // Tools that read go to the library with a book; edits are hammered out at the workshop, and other
@@ -317,7 +319,7 @@ export class SkyScene extends Phaser.Scene {
   /** A picture of what a tool places, for the palette; null until the art is drawn, or for tools that place nothing. */
   preview(tool: Tool): string | null {
     if (!this.#ready) return null;
-    const key = tool === 'path' ? names.tile('path') : tool === 'grass' ? names.tile('grass0') : isItem(tool) ? this.#itemLook(tool).key : null;
+    const key = tool === 'path' ? names.tile('path') : tool === 'grass' ? names.tile('grass0') : tool === 'flowers' ? names.tile('flowers') : isItem(tool) ? this.#itemLook(tool).key : null;
     return key ? this.textures.getBase64(key) : null;
   }
 
@@ -600,9 +602,10 @@ export class SkyScene extends Phaser.Scene {
         deco = this.add.image(x, y, key).setOrigin(a.ox, a.oy).setDepth(y);
       } else if (cell.ch === 'T') {
         deco = this.add.image(x, y + 3 * A, names.tree(hash(cell.c, cell.r, 4) < 0.4)).setOrigin(0.5, 1).setDepth(y + 3 * A);
-      } else if (cell.item && isItem(cell.item)) {
+      }
+      if (cell.item && isItem(cell.item)) {
         const look = this.#itemLook(cell.item);
-        deco = this.add.image(x, y + look.drop, look.key).setOrigin(look.ox, look.oy).setDepth(y + look.drop);
+        deco = this.add.image(x, y + look.drop, look.key).setOrigin(look.ox, look.oy).setDepth(look.flat ? tile.depth + 0.6 : y + look.drop);
       }
       if (deco) extra.push(deco);
       this.#ground.push(...extra);
@@ -927,7 +930,7 @@ export class SkyScene extends Phaser.Scene {
     const choices: Array<() => void> = [];
     if (seat >= 0) choices.push(() => this.#swing(col, seat), () => this.#swing(col, seat));
     if (pg.slide && pg.slide.users.size < SLIDERS) choices.push(() => this.#slide(col));
-    if (pg.pond.length && pg.floating.size < POND_FLOATERS) choices.push(() => this.#float(col), () => this.#float(col));
+    if (this.#openWater(pg).length && pg.floating.size < POND_FLOATERS) choices.push(() => this.#float(col), () => this.#float(col));
     if (!choices.length) return this.#walkTo(col, col.home.door); // nowhere free: it waits at home
     pickOne(choices)();
     this.#track(col, this.time.delayedCall(rand(30000, 60000), () => {
@@ -994,16 +997,18 @@ export class SkyScene extends Phaser.Scene {
   // Into the pond on a rubber ring, drifting from tile to tile.
   #float(col: Mirling): void {
     const pg = col.sec.play;
-    const into = pickOne(pg.pond);
-    const shore = this.#beside(into, this.#tileXY(into.c, into.r))[0];
-    if (!shore) return this.#walkTo(col, col.home.door);
+    const open = this.#openWater(pg);
+    const into = open.length ? pickOne(open) : undefined;
+    const shore = into && this.#beside(into, this.#tileXY(into.c, into.r))[0];
+    if (!into || !shore) return this.#walkTo(col, col.home.door);
     const play: Play = { kind: 'float', back: this.add.image(0, 0, names.ring('back')).setVisible(false), front: this.add.image(0, 0, names.ring('front')).setVisible(false) };
     pg.floating.add(col);
     col.play = play;
     const still = () => col.play === play && !col.removed;
     const drift = () => {
       if (!still()) return;
-      const to = this.#onWater(pickOne(pg.pond));
+      const water = this.#openWater(pg);
+      const to = this.#onWater(water.length ? pickOne(water) : into);
       if (Math.abs(to.x - col.pos.x) > 2) col.facing = to.x < col.pos.x ? -1 : 1;
       this.#track(col, this.tweens.add({ targets: col.pos, ...to, duration: rand(3500, 6000), ease: 'Sine.easeInOut', delay: rand(800, 2500), onComplete: drift }));
     };
@@ -1011,6 +1016,11 @@ export class SkyScene extends Phaser.Scene {
       col.aloft = true;
       drift();
     }));
+  }
+
+  // The pond's tiles with nothing placed on them, where a ring can drift.
+  #openWater(pg: Playground): Spot[] {
+    return pg.pond.filter((s) => !this.#cells.get(`${s.c},${s.r}`)?.item);
   }
 
   // A point on a water tile, near enough its middle that a ring stays on the water.
@@ -1275,13 +1285,14 @@ export class SkyScene extends Phaser.Scene {
 
   // -- build mode, inside --
 
-  #itemLook(kind: ItemKind): { key: string; ox: number; oy: number; drop: number } {
+  #itemLook(kind: ItemKind): { key: string; ox: number; oy: number; drop: number; flat: boolean } {
     const A = this.#art.scale;
-    const drop = (ITEM_DROP[kind] ?? 0) * A;
-    if (kind === 'tree' || kind === 'tree-apple') return { key: names.tree(kind === 'tree-apple'), ox: 0.5, oy: 1, drop };
+    const drop = ((ITEM_DROP[kind] ?? 0) + (onWater(kind) ? WATER_DROP : 0)) * A;
+    const flat = FLAT.has(kind);
+    if (kind === 'tree' || kind === 'tree-apple') return { key: names.tree(kind === 'tree-apple'), ox: 0.5, oy: 1, drop, flat };
     const key = names.item(kind as Decoration);
     const a = this.#art.anchor(key);
-    return { key, ox: a.ox, oy: a.oy, drop };
+    return { key, ox: a.ox, oy: a.oy, drop, flat };
   }
 
   // A layout changed: the ground is laid again and the buildings go to their places, while
@@ -1321,11 +1332,11 @@ export class SkyScene extends Phaser.Scene {
   }
 
   #target(spot: Spot): Target | null {
-    const where = placeOf(spot.c, spot.r, this.#sections.length);
-    const sec = where ? this.#sections[where.i] : undefined;
     const cell = this.#cells.get(`${spot.c},${spot.r}`);
+    const where = cell ? placeOf(spot.c, spot.r, this.#sections.length, cell.by) : null;
+    const sec = where ? this.#sections[where.i] : undefined;
     if (!where || !sec || !cell) return null;
-    return { sec, place: where.place, cell, building: sec.buildings.find((b) => b.c === spot.c && b.r === spot.r) };
+    return { sec, where, cell, building: sec.buildings.find((b) => b.c === spot.c && b.r === spot.r) };
   }
 
   /** What the current tool would do on a tile: a new layout, a building picked up, or why not. */
@@ -1335,15 +1346,15 @@ export class SkyScene extends Phaser.Scene {
     if (tool === 'move') {
       if (!picked) return t.building ? { pick: t.building } : { refused: 'Click a building to pick it up.' };
       if (t.building === picked) return { pick: picked };
-      if (!t.sec.buildings.includes(picked)) return { refused: "A building stays in its own project's section." };
-      return move(layout, buildingIndex(picked), t.cell, t.place);
+      if (t.where.own && !t.sec.buildings.includes(picked)) return { refused: "A building stays in its own project's section." };
+      return move(layout, buildingIndex(picked), t.cell, t.where);
     }
     if (tool === 'restyle') {
       if (t.building?.type !== 'house') return { refused: 'Only houses come in other styles.' };
       return restyle(layout, buildingIndex(t.building), t.building.style);
     }
     if (t.building) return { refused: tool === 'remove' ? 'Buildings stay, since they stand for real work. Move them instead.' : 'A building stands here.' };
-    return edit(layout, tool, t.cell, t.place);
+    return edit(layout, tool, t.cell, t.where.place);
   }
 
   #buildHover(p: Phaser.Input.Pointer): void {
@@ -1369,7 +1380,7 @@ export class SkyScene extends Phaser.Scene {
 
   #buildClick(p: Phaser.Input.Pointer): void {
     const t = this.#target(this.#tileUnder(p));
-    if (!t) return this.#hint("Only on a project's own ground: its shore, the streams and the coast stay as they are.");
+    if (!t) return this.#hint("That's the sky. Build on the island's land and water.");
     const result = this.#outcome(t);
     if ('pick' in result) return this.#pick(result.pick === this.#build.picked ? null : result.pick);
     if ('refused' in result) return this.#hint(result.refused);
@@ -1392,12 +1403,14 @@ export class SkyScene extends Phaser.Scene {
 
   #toolHint(): string {
     const { tool } = this.#build;
-    if (tool === 'move') return 'Click a building, then a free tile in its section.';
+    if (tool === 'move') return 'Click a building, then a free tile on its own ground.';
     if (tool === 'restyle') return 'Click a house to change its style.';
-    if (tool === 'remove') return 'Click a plant or decoration to take it away.';
-    if (tool === 'path' || tool === 'grass') return `Click tiles on a project's own ground to make them ${tool}.`;
+    if (tool === 'remove') return 'Click a tree, plant or decoration to take it away.';
+    if (tool === 'path' || tool === 'grass' || tool === 'flowers') return `Click tiles anywhere on the island to make them ${tool}.`;
+    if (onWater(tool)) return tool === 'boat' ? 'Click a stream or pond to put a boat on it.' : 'Click a stream or pond to float lily pads on it.';
     const label = ITEMS[tool].label.toLowerCase();
-    return `Click a free tile on a project's own ground to place ${/^[aeiou]/.test(label) ? 'an' : 'a'} ${label}.`;
+    const what = label.endsWith('s') ? label : `${/^[aeiou]/.test(label) ? 'an' : 'a'} ${label}`;
+    return `Click a free tile anywhere on the island to place ${what}.`;
   }
 
   #setupInput(): void {

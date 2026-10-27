@@ -2,7 +2,7 @@
 // arrange the buildings, then click the island. Every change is kept as it's made.
 
 import { esc } from '../shared/format.ts';
-import { ITEMS, type ItemKind, type Tool } from './build.ts';
+import { ITEMS, type ItemGroup, type ItemKind, type Tool } from './build.ts';
 
 export interface PaletteOptions {
   /** A picture of what a tool places, if it places something. */
@@ -18,11 +18,12 @@ export interface Palette {
   canUndo(can: boolean): void;
 }
 
-const items = (group: 'Plants' | 'Decor') => (Object.keys(ITEMS) as ItemKind[]).filter((k) => ITEMS[k].group === group).map((tool) => ({ tool, label: ITEMS[tool].label }));
+const items = (group: ItemGroup) => (Object.keys(ITEMS) as ItemKind[]).filter((k) => ITEMS[k].group === group).map((tool) => ({ tool, label: ITEMS[tool].label }));
 const GROUPS: Array<{ name: string; tools: Array<{ tool: Tool; label: string }> }> = [
   { name: 'Plants', tools: items('Plants') },
   { name: 'Decor', tools: items('Decor') },
-  { name: 'Ground', tools: [{ tool: 'path', label: 'Path' }, { tool: 'grass', label: 'Grass' }] },
+  { name: 'Water', tools: items('Water') },
+  { name: 'Ground', tools: [{ tool: 'path', label: 'Path' }, { tool: 'grass', label: 'Grass' }, { tool: 'flowers', label: 'Flowers' }] },
   { name: 'Arrange', tools: [{ tool: 'move', label: 'Move' }, { tool: 'restyle', label: 'Restyle' }, { tool: 'remove', label: 'Remove' }] },
 ];
 

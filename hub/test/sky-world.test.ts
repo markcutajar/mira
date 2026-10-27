@@ -101,15 +101,46 @@ describe('build mode', () => {
     assert.deepEqual(edit(undefined, 'remove', at(cells, 8, 1), '8,1'), { layout: { removed: ['8,1'] } });
     assert.ok('refused' in edit(undefined, 'remove', at(cells, 3, 1), '3,1'));
     assert.ok('refused' in edit(undefined, 'path', at(cells, 4, 1), '4,1')); // a path already
-    assert.deepEqual(move(undefined, 2, at(cells, 3, 1), '3,1'), { layout: { moved: { 2: [3, 1] } } });
+    assert.deepEqual(move(undefined, 2, at(cells, 3, 1), { i: 0, place: '3,1', own: true }), { layout: { moved: { 2: [3, 1] } } });
+    assert.ok('refused' in move(undefined, 2, at(cells, 0, 1), { i: 0, place: '0,1', own: false })); // the shore
     assert.deepEqual(restyle(undefined, 0, 'stone'), { layout: { styles: { 0: 'brick' } } });
   });
 
-  it('finds the section and place on its own ground, and nothing on its shore or outside', () => {
-    assert.deepEqual(placeOf(c0 + 1, r0 + 8, 1), { i: 0, place: '1,8' });
-    assert.equal(placeOf(c0, r0 + 3, 1), null);
-    assert.equal(placeOf(c0 + 9, r0 + 3, 1), null);
-    assert.deepEqual(placeOf(sectionOrigin(1).c0 + 4, sectionOrigin(1).r0 + 4, 2), { i: 1, place: '4,4' });
+  it('builds on the shore and coast, puts boats and lily pads only on water, and leaves bridges be', () => {
+    const cells = generateCells(['code', 'code']);
+    const shore = at(cells, 0, 1);
+    const coast = [...cells.values()].find((c) => c.section === null && c.ch === 'g' && c.c === c0 - 2) as Cell;
+    const out = `-2,${coast.r - r0}`;
+    const stream = at(cells, 10, 1);
+    const bridge = at(cells, 10, 4);
+    assert.deepEqual([stream.ch, bridge.ch], ['w', 'b']);
+    assert.deepEqual(edit(undefined, 'rock', shore, '0,1'), { layout: { placed: { '0,1': 'rock' } } });
+    assert.deepEqual(edit(undefined, 'flowers', coast, out), { layout: { ground: { [out]: 'f' } } });
+    assert.deepEqual(edit(undefined, 'boat', stream, '10,1'), { layout: { placed: { '10,1': 'boat' } } });
+    assert.ok('refused' in edit(undefined, 'boat', shore, '0,1'));
+    assert.ok('refused' in edit(undefined, 'rock', stream, '10,1'));
+    assert.ok('refused' in edit(undefined, 'path', stream, '10,1'));
+    assert.ok('refused' in edit(undefined, 'lilies', bridge, '10,4'));
+    assert.ok('refused' in edit(undefined, 'grass', bridge, '10,4'));
+    arrange(cells, 0, 'code', { placed: { '0,1': 'rock', '10,1': 'boat', '10,4': 'lamp', '0,2': 'boat' }, ground: { [out]: 'f', '10,5': 'p' } });
+    assert.deepEqual([shore.item, shore.walk, shore.by], ['rock', false, 0]);
+    assert.deepEqual([stream.item, coast.ch], ['boat', 'f']);
+    assert.deepEqual([bridge.item, bridge.ch, at(cells, 10, 5).ch], [undefined, 'b', 'b']); // a bridge takes neither
+    assert.equal(at(cells, 0, 2).item, undefined); // a boat on land
+  });
+
+  it('finds whose layout a tile is in: its own ground, or the nearest section within reach of its shore', () => {
+    const one = sectionOrigin(1);
+    assert.deepEqual(placeOf(c0 + 1, r0 + 8, 1), { i: 0, place: '1,8', own: true });
+    assert.deepEqual(placeOf(c0, r0 + 3, 1), { i: 0, place: '0,3', own: false });
+    assert.deepEqual(placeOf(c0 - 3, r0 + 12, 1), { i: 0, place: '-3,12', own: false });
+    assert.equal(placeOf(c0 - 4, r0 + 3, 1), null);
+    assert.deepEqual(placeOf(one.c0 + 4, one.r0 + 4, 2), { i: 1, place: '4,4', own: true });
+    // The stream between two sections: its near bank's half to each.
+    assert.deepEqual(placeOf(c0 + 10, r0 + 2, 2), { i: 0, place: '10,2', own: false });
+    assert.deepEqual(placeOf(c0 + 11, r0 + 2, 2), { i: 1, place: '-1,2', own: false });
+    // A tile a layout already changed stays in that layout.
+    assert.deepEqual(placeOf(c0 + 11, r0 + 2, 2, 0), { i: 0, place: '11,2', own: false });
   });
 
   it('treats layouts as the same whatever order their keys came in', () => {

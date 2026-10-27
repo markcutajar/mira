@@ -17,7 +17,10 @@ export type Frame = 'a' | 'b';
 export type { HouseStyle, Palette };
 /** Ground tiles; a bridge's deck has its planks across the way it's crossed. */
 export type TileKind = 'grass0' | 'grass1' | 'grass2' | 'flowers' | 'path' | 'water' | 'deck-c' | 'deck-r';
-export type Decoration = 'shrub' | 'flowerbed' | 'lamp' | 'bench' | 'statue';
+export type Decoration =
+  | 'pine' | 'shrub' | 'flowerbed' | 'sunflowers' | 'mushrooms'
+  | 'lamp' | 'bench' | 'statue' | 'rock' | 'crates' | 'well' | 'campfire'
+  | 'lilies' | 'boat';
 /** The edges of a tile's diamond: north-east and north-west at the back, south-east and south-west in front. */
 export type Edge = 'ne' | 'nw' | 'se' | 'sw';
 /** What a mirling holds while it works (decision 41): a book to read, a hammer to make, a console to run. */
@@ -35,7 +38,7 @@ export const names = {
   house: (style: HouseStyle, lit: boolean) => `house.${style}.${lit ? 'lit' : 'dark'}`,
   /** Libraries and workshops grow taller with their level, 1 to MAX_LEVEL. */
   building: (type: 'library' | 'workshop', level: number) => `${type}.${level}`,
-  /** Plants and decorations placed in build mode (decision 39); placed trees use `tree`. */
+  /** Plants, decorations and things on the water placed in build mode (decisions 39 and 44); placed oaks and apple trees use `tree`. */
   item: (kind: Decoration) => `item.${kind}`,
   /** Where mirlings wait for me (decision 41): the swings' frame, without its seats, and the slide. */
   play: (kind: 'swings' | 'slide') => `play.${kind}`,

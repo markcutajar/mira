@@ -115,12 +115,12 @@
   .build[aria-pressed="true"] { border-color: var(--thronglet); color: var(--thronglet); }
 
   /* Build mode's palette (decision 39), where the story would open. */
-  .palette { margin-left: auto; align-self: flex-start; width: 270px; max-height: 100%; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .palette { margin-left: auto; align-self: flex-start; width: 290px; max-height: 100%; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
   .palette[hidden] { display: none; }
   .palette-head { display: flex; justify-content: space-between; align-items: center; }
   .palette-head h2 { margin: 0; font: 600 18px var(--font-display); }
   .palette-group .eyebrow { margin: 0 0 6px; }
-  .tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
   .tool { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 8px; background: transparent; border: 2px solid var(--hull-edge); color: var(--ink); font: 12px var(--font-display); text-align: left; cursor: pointer; }
   .tool:hover { background: rgba(255, 255, 255, 0.04); }
   .tool[aria-pressed="true"] { border-color: var(--thronglet); background: rgba(255, 211, 77, 0.1); }

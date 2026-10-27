@@ -24,8 +24,10 @@ export interface Cell extends Spot {
   walk: boolean;
   /** Which way a bridge crosses its stream: along columns or along rows. */
   span?: 'c' | 'r';
-  /** A plant or decoration placed in build mode (decision 39). */
+  /** A plant or decoration placed in build mode (decisions 39 and 44). */
   item?: string;
+  /** The section whose layout changed this tile, if one did. */
+  by?: number;
 }
 
 export interface TemplateBuilding extends Spot {
