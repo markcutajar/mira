@@ -24,7 +24,8 @@ type FromHub = { type: 'state'; running: boolean; title?: string; exitCode?: num
 
 // The look of my Windows Terminal: Cascadia Code, semi-light, 8 point, with each cell 1.2 times
 // the font size high and 0.6 times wide. Sizes are in points, as there; the page needs pixels.
-const LOOK = { family: '"Cascadia Code", "Cascadia Mono", Consolas, monospace', weight: 350, cellHeight: 1.2, cellWidth: 0.6 };
+// Without Cascadia, a Mac falls back to Menlo and Ubuntu to DejaVu Sans Mono or Ubuntu Mono.
+const LOOK = { family: '"Cascadia Code", "Cascadia Mono", Consolas, Menlo, "DejaVu Sans Mono", "Ubuntu Mono", monospace', weight: 350, cellHeight: 1.2, cellWidth: 0.6 };
 const SIZE_KEY = 'mira.terminalPoints';
 const SIZES = { min: 6, max: 18, start: 8 };
 

@@ -6,7 +6,7 @@
 
 Mira watches every Claude Code session on your machine and draws them as mirlings, small creatures at work on a pixel-art island floating in space. Each project is a section of the island. At a glance you see what's moving, what's stuck and what's waiting on you; click a mirling and its story opens, turn by turn, with tokens and estimated cost.
 
-> **Status:** a personal project, built and used on Windows 11. Other systems are untested.
+> **Status:** a personal project, built and used on Windows 11. It runs on Linux too, tested on Ubuntu 22.04, and should run on a Mac, though nobody has tried yet. Starting the hub at login is only set up for Windows so far.
 
 ## What it does
 

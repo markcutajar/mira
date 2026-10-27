@@ -81,6 +81,8 @@ These go in `~/.claude/settings.json` under `"hooks"`. Watch-only hooks run `cur
 }
 ```
 
+On a Mac, `date` can't print milliseconds, so use `$(perl -MTime::HiRes=time -e 'printf q(%d), time*1000')` in place of `$(date +%s%3N)`. On Linux, and on Windows, where Claude Code runs hooks with Git Bash, the lines work as they are.
+
 The `PreToolUse` entry is repeated for `SessionStart`, `UserPromptSubmit`, `Stop`, `StopFailure`, `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`, `SubagentStart`, `SubagentStop`, `Notification` and `CwdChanged`. `SessionEnd` needs no inbox headers: Claude Code closes the inbox before that hook runs, and the hub forgets it then.
 
 ## Endpoints

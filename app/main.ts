@@ -54,7 +54,7 @@ try {
 }
 const page = (body: string) => `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><html><head><meta charset="utf-8"><title>Mira</title><style>
   body { margin: 0; height: 100vh; display: grid; place-content: center; justify-items: center; gap: 12px; background: ${VOID}; color: #ece8d9; font: 15px/1.5 "IBM Plex Sans", "Segoe UI", sans-serif; text-align: center; }
-  img { width: 72px; margin-bottom: 6px; image-rendering: pixelated; } p { margin: 0; max-width: 34em; } .dim { color: #9c9dbb; font-size: 13px; white-space: pre-wrap; } code { font-family: "Cascadia Code", Consolas, monospace; }
+  img { width: 72px; margin-bottom: 6px; image-rendering: pixelated; } p { margin: 0; max-width: 34em; } .dim { color: #9c9dbb; font-size: 13px; white-space: pre-wrap; } code { font-family: "Cascadia Code", Consolas, Menlo, "DejaVu Sans Mono", monospace; }
 </style></head><body>${mirling ? `<img src="data:image/svg+xml;base64,${mirling}" alt="">` : ''}${body}</body></html>`)}`;
 
 // The window keeps its size and place between runs, if that place is still on a screen.

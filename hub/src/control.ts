@@ -83,7 +83,8 @@ async function status(): Promise<void> {
   console.log(up ? `The hub is running at ${url}${running ? ` in the background (process ${running}), logging to ${LOG}` : ', in a terminal'}.` : "The hub isn't running.");
   const terminals = await runningTerminals(miraHome);
   if (terminals?.length) console.log(`${plural(terminals.length, 'terminal')} running in the terminal host, carrying on through restarts until the hub is stopped.`);
-  console.log(existsSync(startupFile()) ? 'It starts at login.' : "It doesn't start at login. Turn that on with: npm run hub:login");
+  // Starting at login is only set up for Windows so far.
+  if (process.platform === 'win32') console.log(existsSync(startupFile()) ? 'It starts at login.' : "It doesn't start at login. Turn that on with: npm run hub:login");
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
