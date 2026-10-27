@@ -277,6 +277,29 @@ describe('hub server', () => {
     assert.equal((await fetch(`${base}/api/systems/${encodeURIComponent('not here')}/start`)).status, 404);
   });
 
+  it('starts a new session in the repo I pick, in a group of repos', async () => {
+    const group = new Roster();
+    const placeFor = (cwd: string | undefined) => ({ system: 'Site', repo: cwd?.split('\\').pop(), root: cwd });
+    group.seed('claude-code', [
+      { sessionId: 'g-1', system: 'Site', cwd: 'C:\\code\\site-app', lastAt: '2026-10-27T10:00:00.000Z', status: 'my-turn', transcript: 'C:\\t\\g-1.jsonl' },
+      { sessionId: 'g-2', system: 'Site', cwd: 'C:\\code\\site-docs', lastAt: '2026-10-27T11:00:00.000Z', status: 'working', transcript: 'C:\\t\\g-2.jsonl' },
+    ]);
+    const site = createHub({ ...options, store: new Store(':memory:'), roster: group, placeFor });
+    const at = await listen(site);
+    try {
+      const listed = ((await (await fetch(`${at}/api/sessions`)).json()) as { sessions: Array<{ id: string; repo?: string }> }).sessions;
+      assert.deepEqual(listed.map((s) => [s.id, s.repo]).sort(), [['g-1', 'site-app'], ['g-2', 'site-docs']]);
+      const target = await (await fetch(`${at}/api/systems/Site/start`)).json();
+      assert.equal(target.folder, 'C:\\code\\site-docs'); // the one used last
+      assert.deepEqual(target.choices.map((c: { folder: string }) => c.folder), ['C:\\code\\site-docs', 'C:\\code\\site-app']);
+      const start = (body: unknown) => fetch(`${at}/api/systems/Site/start`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: at }, body: JSON.stringify(body) });
+      assert.equal((await start({ prompt: 'Bump the app', folder: 'C:\\code\\site-app' })).status, 204);
+      assert.equal((await start({ folder: 'C:\\Windows' })).status, 400);
+    } finally {
+      await new Promise((done) => site.server.close(done));
+    }
+  });
+
   it('records what a source reports after an event, such as token use', async () => {
     await post('/ingest/claude-code', { hook_event_name: 'Stop', session_id: 's-6', cwd: 'C:\\code\\mira', prompt_id: 'p-1' });
     assert.deepEqual((await sessions()).sessions.find((s) => s.id === 's-6')?.usage, { tokens: 30, costUsd: 0.5 });

@@ -76,13 +76,18 @@ export function createHub(options: HubOptions) {
   const removed: Record<Kind, Record<string, string>> = { system: store.removed('system'), session: store.removed('session') };
   // Removed stays removed until something happens after it.
   const gone = (kind: Kind, key: string, lastAt: string) => (removed[kind][key] ?? '') >= lastAt;
+  // Where in its project a session runs: its worktree, and its repo when the project is a group (decision 47).
+  const labels = (cwd: string | undefined) => {
+    const { worktree, repo } = options.placeFor(cwd);
+    return { worktree, ...(repo ? { repo } : {}) };
+  };
 
   const sessions = () => roster.snapshot()
     .filter((s) => !gone('session', s.id, s.lastAt) && !gone('system', s.system, s.lastAt))
     .map((s) => ({
       ...s,
       title: names.session[s.id] ?? sources.get(s.source)?.title?.(s),
-      worktree: options.placeFor(s.cwd).worktree,
+      ...labels(s.cwd),
       ...(sources.get(s.source)?.canMessage?.(s) ? { canMessage: true } : {}),
     }));
 
@@ -113,7 +118,7 @@ export function createHub(options: HubOptions) {
     const spent = store.spent(system);
     const page = past.slice(0, limit).map((p) => ({
       id: p.sessionId, source: p.source, system, cwd: p.cwd, lastAt: p.lastAt,
-      title: names.session[p.sessionId] ?? p.title, worktree: options.placeFor(p.cwd).worktree,
+      title: names.session[p.sessionId] ?? p.title, ...labels(p.cwd),
       ...(spent[p.sessionId] ? { usage: spent[p.sessionId] } : {}),
     }));
     json(res, { sessions: page, more: past.length > limit });
@@ -239,26 +244,33 @@ export function createHub(options: HubOptions) {
     broadcast('sessions', sessions());
   }
 
-  // A project's own folder: the root of its most recent live session, else of the folders its
-  // stored events name, as long as it still exists and the editor can find a window for it.
-  function projectFolder(system: string): { folder: string; target: EditorTarget } | undefined {
+  // A project's own folders: the roots of its live sessions, most recent first, then of the folders
+  // its stored events name, as long as they still exist and the editor can find a window for them.
+  // A project has one, unless it's a group of repos (decision 47).
+  function projectFolders(system: string): Array<{ folder: string; target: EditorTarget }> {
     const live = roster.snapshot().filter((s) => s.system === system && s.cwd).sort((a, b) => b.lastAt.localeCompare(a.lastAt)).map((s) => s.cwd as string);
-    for (const cwd of new Set([...live, ...store.folders(system)])) {
+    const found = new Map<string, EditorTarget>();
+    for (const cwd of new Set([...live, ...store.folders(system, 100)])) {
       const place = options.placeFor(cwd);
-      const target = place.system === system && place.root ? options.editor?.target(place.root) : undefined;
-      if (place.root && target) return { folder: place.root, target };
+      if (place.system !== system || !place.root || found.has(place.root)) continue;
+      const target = options.editor?.target(place.root);
+      if (target) found.set(place.root, target);
     }
-    return undefined;
+    return [...found].map(([folder, target]) => ({ folder, target }));
   }
 
   // Starting a new session works like carrying one on: GET names the window, for the page's link,
-  // and POST then opens a new chat there with my prompt typed in, never sent (decision 29).
+  // and POST then opens a new chat there with my prompt typed in, never sent (decision 29). In a
+  // group, GET also lists its repos to choose from, and POST names the one chosen.
   async function startIn(req: IncomingMessage, res: ServerResponse, system: string) {
     const starter = options.sources.find((s) => s.startAt);
-    const found = starter ? projectFolder(system) : undefined;
-    if (!starter || !found) return reply(res, 404, `Mira doesn't know a folder for ${system} yet.`);
-    if (req.method === 'GET') return json(res, { ...found.target, folder: found.folder });
+    const folders = starter ? projectFolders(system) : [];
+    if (!starter || !folders[0]) return reply(res, 404, `Mira doesn't know a folder for ${system} yet.`);
+    const choice = (f: { folder: string; target: EditorTarget }) => ({ ...f.target, folder: f.folder });
+    if (req.method === 'GET') return json(res, { ...choice(folders[0]), ...(folders.length > 1 ? { choices: folders.map(choice) } : {}) });
     const body = parseObject(await readBody(req)) ?? {};
+    const found = body.folder === undefined ? folders[0] : folders.find((f) => f.folder === body.folder);
+    if (!found) return reply(res, 400, `That folder isn't one of ${system}'s.`);
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
     if (prompt.length > MAX_PROMPT) return reply(res, 400, `A prompt opened from Mira can be up to ${MAX_PROMPT} characters.`);
     const at = starter.startAt?.(found.folder, prompt || undefined);

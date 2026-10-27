@@ -27,8 +27,13 @@ export class Store {
   #setLayout: StatementSync;
   #clearLayout: StatementSync;
   #spent: StatementSync;
+  #stored: StatementSync;
+  #systemOf: (stored: string) => string;
 
-  constructor(file: string) {
+  // Events keep the section they were stored under. `systemOf` maps that to the section it belongs
+  // to now, so a repo grouped in the config brings its history into the group (decision 47).
+  constructor(file: string, systemOf: (stored: string) => string = (stored) => stored) {
+    this.#systemOf = systemOf;
     if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
     this.#db = new DatabaseSync(file);
     this.#db.exec(`
@@ -57,7 +62,8 @@ export class Store {
     this.#since = this.#db.prepare('SELECT body FROM events WHERE at >= ? ORDER BY at, seq');
     this.#sinceOfType = this.#db.prepare('SELECT body FROM events WHERE at >= ? AND type = ? ORDER BY at, seq');
     // A folder move never makes a project of its own (decision 27).
-    this.#systems = this.#db.prepare("SELECT system, MIN(at) AS first_at, MAX(at) AS last_at FROM events WHERE type != 'session.moved' GROUP BY system HAVING MAX(at) >= ? ORDER BY first_at, system");
+    this.#systems = this.#db.prepare("SELECT system, MIN(at) AS first_at, MAX(at) AS last_at FROM events WHERE type != 'session.moved' GROUP BY system");
+    this.#stored = this.#db.prepare('SELECT DISTINCT system FROM events');
     this.#names = this.#db.prepare('SELECT key, name FROM names WHERE kind = ?');
     this.#setName = this.#db.prepare('INSERT INTO names (kind, key, name) VALUES (?, ?, ?) ON CONFLICT (kind, key) DO UPDATE SET name = excluded.name');
     this.#clearName = this.#db.prepare('DELETE FROM names WHERE kind = ? AND key = ?');
@@ -71,9 +77,20 @@ export class Store {
       SUM(COALESCE(json_extract(body, '$.usage.inputTokens'), 0) + COALESCE(json_extract(body, '$.usage.outputTokens'), 0)
         + COALESCE(json_extract(body, '$.usage.cacheReadTokens'), 0) + COALESCE(json_extract(body, '$.usage.cacheWriteTokens'), 0)) AS tokens,
       SUM(COALESCE(json_extract(body, '$.usage.costUsd'), 0)) AS cost
-      FROM events WHERE type = 'usage.reported' AND system = ? GROUP BY session`);
+      FROM events WHERE type = 'usage.reported' AND system IN (SELECT value FROM json_each(?)) GROUP BY session`);
     this.#prune = this.#db.prepare("DELETE FROM events WHERE at < ? AND type != 'usage.reported'");
-    this.#folders = this.#db.prepare("SELECT json_extract(body, '$.detail.cwd') AS cwd FROM events WHERE system = ? AND type != 'session.moved' AND cwd IS NOT NULL GROUP BY cwd ORDER BY MAX(at) DESC LIMIT ?");
+    this.#folders = this.#db.prepare("SELECT json_extract(body, '$.detail.cwd') AS cwd FROM events WHERE system IN (SELECT value FROM json_each(?)) AND type != 'session.moved' AND cwd IS NOT NULL GROUP BY cwd ORDER BY MAX(at) DESC LIMIT ?");
+  }
+
+  /** The names a system's events were stored under, as a JSON list for the queries above. */
+  #storedAs(system: string): string {
+    return JSON.stringify(this.#stored.all().map((row) => String(row.system)).filter((stored) => this.#systemOf(stored) === system));
+  }
+
+  #read(body: unknown): MiraEvent {
+    const event = JSON.parse(String(body)) as MiraEvent;
+    event.system = this.#systemOf(event.system);
+    return event;
   }
 
   /** Stores an event; returns false if one with the same id is already stored. */
@@ -84,28 +101,35 @@ export class Store {
 
   /** The newest events first. */
   recent(limit: number): MiraEvent[] {
-    return this.#recent.all(limit).map((row) => JSON.parse(String(row.body)) as MiraEvent);
+    return this.#recent.all(limit).map((row) => this.#read(row.body));
   }
 
   /** Events at or after `at`, oldest first, optionally of one type. */
   since(at: string, type?: MiraEvent['type']): MiraEvent[] {
     const rows = type ? this.#sinceOfType.all(at, type) : this.#since.all(at);
-    return rows.map((row) => JSON.parse(String(row.body)) as MiraEvent);
+    return rows.map((row) => this.#read(row.body));
   }
 
   /** Every system with events since `at`, in the order each first appeared, so the island grows at its edge. */
   systems(at: string): Array<{ name: string; firstAt: string; lastAt: string }> {
-    return this.#systems.all(at).map((row) => ({ name: String(row.system), firstAt: String(row.first_at), lastAt: String(row.last_at) }));
+    const by = new Map<string, { name: string; firstAt: string; lastAt: string }>();
+    for (const row of this.#systems.all()) {
+      const name = this.#systemOf(String(row.system));
+      const [firstAt, lastAt] = [String(row.first_at), String(row.last_at)];
+      const known = by.get(name);
+      by.set(name, known ? { name, firstAt: firstAt < known.firstAt ? firstAt : known.firstAt, lastAt: lastAt > known.lastAt ? lastAt : known.lastAt } : { name, firstAt, lastAt });
+    }
+    return [...by.values()].filter((s) => s.lastAt >= at).sort((a, b) => a.firstAt.localeCompare(b.firstAt) || a.name.localeCompare(b.name));
   }
 
   /** The working folders a system's events have named, most recently used first. */
   folders(system: string, limit = 20): string[] {
-    return this.#folders.all(system, limit).map((row) => String(row.cwd));
+    return this.#folders.all(this.#storedAs(system), limit).map((row) => String(row.cwd));
   }
 
   /** The tokens and estimated cost of every session in a project that reported any, by session. */
   spent(system: string): Record<string, { tokens: number; costUsd: number }> {
-    return Object.fromEntries(this.#spent.all(system).map((row) => [String(row.session), { tokens: Number(row.tokens), costUsd: Math.round(Number(row.cost) * 1e6) / 1e6 }]));
+    return Object.fromEntries(this.#spent.all(this.#storedAs(system)).map((row) => [String(row.session), { tokens: Number(row.tokens), costUsd: Math.round(Number(row.cost) * 1e6) / 1e6 }]));
   }
 
   /** My names for projects or sessions, by key. */
@@ -119,9 +143,17 @@ export class Store {
     else this.#clearName.run(kind, key);
   }
 
-  /** How I arranged each project's section, by project. */
+  /** How I arranged each project's section, by project. A group I haven't arranged yet starts from the repo I arranged most. */
   layouts(): Record<string, SectionLayout> {
-    return Object.fromEntries(this.#layouts.all().map((row) => [String(row.system), JSON.parse(String(row.layout)) as SectionLayout]));
+    const chosen = new Map<string, { layout: string; own: boolean }>();
+    for (const row of this.#layouts.all()) {
+      const [key, layout] = [String(row.system), String(row.layout)];
+      const section = this.#systemOf(key);
+      const own = section === key;
+      const best = chosen.get(section);
+      if (!best || (own && !best.own) || (!best.own && !own && layout.length > best.layout.length)) chosen.set(section, { layout, own });
+    }
+    return Object.fromEntries([...chosen].map(([section, { layout }]) => [section, JSON.parse(layout) as SectionLayout]));
   }
 
   /** Keeps a project's layout; null forgets it. */

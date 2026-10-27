@@ -13,14 +13,14 @@ import { createHub } from './server.ts';
 import { shapeRecorder } from './shapes.ts';
 import type { SourceAdapter } from './sources.ts';
 import { Store } from './store.ts';
-import { makePlaceResolver } from './systems.ts';
+import { makePlaceResolver, makeSectionNamer } from './systems.ts';
 import { Terminals } from './terminals.ts';
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
 const config = loadConfig();
-const store = new Store(join(miraHome, 'mira.db'));
+const store = new Store(join(miraHome, 'mira.db'), makeSectionNamer(config.systems).name);
 const placeFor = makePlaceResolver(config.systems);
 const roster = new Roster({ workingMs: config.quiet.workingMinutes * 60 * 1000, idleMs: config.quiet.idleHours * HOUR });
 const pidFile = join(miraHome, 'hub.pid');
@@ -49,7 +49,7 @@ for (const event of store.since(new Date(now - 30 * DAY).toISOString(), 'usage.r
 const growth = new GrowthTracker({
   systems: () => store.systems(new Date(Date.now() - 14 * DAY).toISOString()).map((s) => s.name),
   rootsFor: (system) => {
-    const cwds = [...roster.snapshot().filter((s) => s.system === system && s.cwd).map((s) => s.cwd as string), ...store.folders(system)];
+    const cwds = [...roster.snapshot().filter((s) => s.system === system && s.cwd).map((s) => s.cwd as string), ...store.folders(system, 100)];
     return [...new Set(cwds.map((cwd) => placeFor(cwd)).filter((p) => p.system === system && p.root).map((p) => p.root as string))];
   },
   onChange: () => hub.announceSystems(),

@@ -50,7 +50,7 @@ On startup it rebuilds today's picture from stored events, reads recent Claude C
 ```json
 {
   "port": 4711,
-  "systems": { "acme-core": "Acme", "acme-web": "Acme" },
+  "systems": { "acme-*": "Acme", "shop-web*": "Shop Web" },
   "permissionWaitSeconds": 60,
   "activeHours": 2,
   "recordShapes": true,
@@ -60,7 +60,7 @@ On startup it rebuilds today's picture from stored events, reads recent Claude C
 }
 ```
 
-- `systems` renames or groups sections by folder, before anything reaches the store; Rename in Mira only changes the name shown (decision 30). Keys are repo folder names; giving two folders the same name puts them in one section. Git worktrees join their main repo's section on their own, labelled with the worktree's folder name, so they need no entry here.
+- `systems` renames or groups sections by repo folder name; Rename in Mira only changes the name shown (decision 30). A key is a folder name, or a pattern where `*` stands for anything, matched without case: `"acme-*": "Acme"` makes every acme repo one group. An exact name wins over a pattern, and patterns are tried in the order written. A group takes in its repos' earlier events, token counts and buildings too, starts from the arrangement of the repo you arranged most until you arrange the group, and labels each session with its repo; a new session in a group asks which repo (decision 47). Restart the hub after changing it. Taking a repo out of a group applies to what happens next: events it stored under the group stay there until they age out. Git worktrees join their main repo's section on their own, labelled with the worktree's folder name, so they need no entry here.
 - `permissionWaitSeconds` is how long a prompt waits for Mira while Mira is open. Keep it below the `PermissionRequest` hook's timeout, which is 65 seconds.
 - `activeHours` is how recent a transcript must be for its session to count as running at startup.
 - `keepDays` is how many days of events to keep; 0 keeps everything. Per-turn token counts are always kept (decision 32).
@@ -101,8 +101,8 @@ The `PreToolUse` entry is repeated for `SessionStart`, `UserPromptSubmit`, `Stop
 | `GET /api/layouts` | How each project's section is arranged in build mode, by project (decisions 39 and 44) |
 | `PUT /api/layouts/:system` | A project's layout: `{ ground, placed, removed, moved, styles }`, places counted from its corner: its own ground from `1,1` to `8,8`, its shore at `0` and `9`, and the coast and streams around it from `-3` to `12`. Buildings move only on its own ground. An empty one forgets it. |
 | `GET /api/systems/:name/history` | The project's earlier conversations, newest first, leaving out those on the board: `{ sessions: [{ id, title, lastAt, cwd, usage }], more }`. `?limit=20` and `?before=<lastAt>` page through them. Read from the sources when asked (decision 40). |
-| `GET /api/systems/:name/start` | The project's folder and its VS Code window: `{ link, name, folder }` |
-| `POST /api/systems/:name/start` | `{ "prompt" }`: opens a new Claude Code chat in that window, a moment later, with the prompt typed in. Up to 1,500 characters. |
+| `GET /api/systems/:name/start` | The project's folder and its VS Code window: `{ link, name, folder }`. A group of repos adds `choices`, one of these for each repo, the one used last first (decision 47). |
+| `POST /api/systems/:name/start` | `{ "prompt", "folder" }`: opens a new Claude Code chat in that window, a moment later, with the prompt typed in. Up to 1,500 characters. `folder` picks one of a group's `choices`, and defaults to the first. |
 | `GET /api/events?limit=100` | The most recent events |
 | `GET /api/stream` | Live updates as Server-Sent Events. Add `?visible=0` for a viewer that isn't on screen. |
 | `POST /api/presence` | `{ "viewer", "visible" }`: whether a viewer is on screen |

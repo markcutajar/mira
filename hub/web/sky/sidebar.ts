@@ -132,9 +132,13 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
     return `<div class="earlier">${toggle}${body}${more}</div>`;
   }
 
+  const treeBadge = (s: BoardSession) => (s.worktree ? `<span class="badge tree" title="A git worktree of ${esc(s.repo ?? s.system)}">${esc(s.worktree)}</span>` : '');
+  // In a group of repos (decision 47), the line under a session's title starts with its repo.
+  const repoOf = (s: BoardSession) => (s.repo && !s.worktree ? `<span class="row-repo" title="Its repo, in ${esc(projectLabel(s.system, live.systems))}">${esc(s.repo)}</span>` : '');
+
   function pastHTML(s: BoardSession): string {
-    const badge = s.worktree ? `<span class="badge tree" title="A git worktree of ${esc(s.system)}">${esc(s.worktree)}</span>` : '';
-    const meta = [esc(when(s.lastAt)), s.usage ? esc(cost(s.usage.costUsd)) : ''].filter(Boolean).join(' · ');
+    const badge = treeBadge(s);
+    const meta = [repoOf(s), esc(when(s.lastAt)), s.usage ? esc(cost(s.usage.costUsd)) : ''].filter(Boolean).join(' · ');
     return `<li class="row-item"><button type="button" class="row${options.current() === s.id ? ' open' : ''}" data-session="${esc(s.id)}" data-status="earlier" title="Open its story; Terminal or Continue in VS Code picks it up again">
       <span class="dot"></span>
       <span class="row-title">${esc(sessionLabel(s))}${badge}</span>
@@ -167,10 +171,10 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
   function rowHTML(s: BoardSession): string {
     const status = s.status ?? 'unknown';
     const badges = [
-      s.worktree ? `<span class="badge tree" title="A git worktree of ${esc(s.system)}">${esc(s.worktree)}</span>` : '',
+      treeBadge(s),
       s.permissionMode && s.permissionMode !== 'default' ? `<span class="badge" data-mode="${esc(s.permissionMode)}">${esc(s.permissionMode)}</span>` : '',
     ].join('');
-    const meta = [s.lastTool ? esc(s.lastTool) : '', `<span data-since="${esc(s.lastAt)}"></span>`, s.usage ? esc(cost(s.usage.costUsd)) : ''].filter(Boolean).join(' · ');
+    const meta = [repoOf(s), s.lastTool ? esc(s.lastTool) : '', `<span data-since="${esc(s.lastAt)}"></span>`, s.usage ? esc(cost(s.usage.costUsd)) : ''].filter(Boolean).join(' · ');
     return `<li class="row-item"><button type="button" class="row${options.current() === s.id ? ' open' : ''}" data-session="${esc(s.id)}" data-status="${esc(status)}">
       <span class="dot" title="${esc(STATUS_LABEL[status] ?? 'Unknown')}"></span>
       <span class="row-title">${esc(sessionLabel(s))}${badges}</span>

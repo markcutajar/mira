@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { after, describe, it } from 'node:test';
 import type { MiraEvent } from '../../contracts/src/index.ts';
 import { Store } from '../src/store.ts';
-import { makePlaceResolver, type GitMarker } from '../src/systems.ts';
+import { makePlaceResolver, makeSectionNamer, type GitMarker } from '../src/systems.ts';
 
 const event = (id: string, at: string): MiraEvent => ({
   v: 1, id, at, source: 'claude-code', system: 'mira', actor: { kind: 'session', id: 's-1' }, type: 'tool.started', status: 'working',
@@ -73,6 +73,46 @@ describe('Store', () => {
     assert.deepEqual(store.systems(at(5)).map((s) => [s.name, s.firstAt, s.lastAt]), [['garden', at(10), at(20)], ['mira', at(12), at(12)]]);
     store.close();
   });
+
+  it('brings the history of repos grouped in the config into their group', () => {
+    const store = new Store(':memory:', makeSectionNamer({ 'site-*': 'Site' }).name);
+    const at = (n: number) => `2026-10-${String(n).padStart(2, '0')}T12:00:00.000Z`;
+    const add = (n: number, system: string, day: number, more: Partial<MiraEvent> = {}) =>
+      store.add({ ...event(`00000000-0000-4000-8000-00000000040${n}`, at(day)), system, detail: { cwd: `C:\\code\\${system}` }, ...more });
+    add(1, 'mira', 9);
+    add(2, 'site-docs', 11);
+    add(3, 'site-app', 10); // stored before the group existed
+    add(4, 'Site', 20, { detail: { cwd: 'C:\\code\\site-api' } }); // stored under the group
+    add(5, 'site-app', 12, { type: 'usage.reported', status: undefined, usage: { outputTokens: 7, costUsd: 0.25 } });
+    assert.deepEqual(store.systems(at(5)).map((s) => [s.name, s.firstAt, s.lastAt]), [['mira', at(9), at(9)], ['Site', at(10), at(20)]]);
+    assert.deepEqual(store.since(at(1)).map((e) => e.system), ['mira', 'Site', 'Site', 'Site', 'Site']);
+    assert.deepEqual(store.folders('Site'), ['C:\\code\\site-api', 'C:\\code\\site-app', 'C:\\code\\site-docs']);
+    assert.deepEqual(store.spent('Site'), { 's-1': { tokens: 7, costUsd: 0.25 } });
+    assert.deepEqual(store.spent('site-app'), {});
+    store.close();
+  });
+
+  it("starts a group from the repo I arranged most, until I arrange the group itself", () => {
+    const store = new Store(':memory:', makeSectionNamer({ 'site-*': 'Site' }).name);
+    store.setLayout('site-app', { placed: { '1,1': 'bench' } });
+    store.setLayout('site-docs', { placed: { '1,1': 'bench', '2,2': 'lamp' } });
+    store.setLayout('mira', { styles: { 0: 'stone' } });
+    assert.deepEqual(store.layouts(), { Site: { placed: { '1,1': 'bench', '2,2': 'lamp' } }, mira: { styles: { 0: 'stone' } } });
+    store.setLayout('Site', { placed: { '3,3': 'tree' } });
+    assert.deepEqual(store.layouts().Site, { placed: { '3,3': 'tree' } });
+    store.close();
+  });
+});
+
+describe('section names', () => {
+  it('groups repos by pattern, without case, with exact names first', () => {
+    const sections = makeSectionNamer({ 'acme-*': 'Acme', 'shop-web*': 'Shop Web', 'acme-tools': 'Tools', 'a.b': 'Dots' });
+    assert.deepEqual(['acme-core', 'Acme-PM', 'acme-tools', 'acme', 'shop-web', 'shop-web-app', 'shop-landing', 'axb', 'a.b'].map(sections.name),
+      ['Acme', 'Acme', 'Tools', 'acme', 'Shop Web', 'Shop Web', 'shop-landing', 'axb', 'Dots']);
+    assert.deepEqual(['Acme', 'Shop Web'].map(sections.name), ['Acme', 'Shop Web']); // a group's own name stays put
+    assert.deepEqual(['Acme', 'Tools', 'Dots', 'mira'].map(sections.isGroup), [true, false, false, false]);
+    assert.equal(makeSectionNamer({ a: 'Both', b: 'Both' }).isGroup('Both'), true);
+  });
 });
 
 describe('placeFor', () => {
@@ -104,6 +144,17 @@ describe('placeFor', () => {
     const renamed = makePlaceResolver({ mira: 'Mira' }, gitMarker);
     assert.deepEqual(renamed(resolve('/code/mira')), { system: 'Mira', root: resolve('/code/mira') });
     assert.deepEqual(renamed(resolve('/code/mira/.claude/worktrees/feature-x')), { system: 'Mira', worktree: 'feature-x', root: resolve('/code/mira') });
+  });
+
+  it('labels each session in a group with its own repo', () => {
+    const grouped = makePlaceResolver({ '*': 'Code' }, gitMarker);
+    assert.deepEqual(grouped(resolve('/code/app/src')), { system: 'Code', repo: 'app', root: resolve('/code/app') });
+    assert.deepEqual(grouped(resolve('/code/mira/.claude/worktrees/hotfix')), { system: 'Code', worktree: 'hotfix', repo: 'mira', root: resolve('/code/mira') });
+  });
+
+  it('spells a Windows drive one way, so a repo is never two', { skip: process.platform !== 'win32' }, () => {
+    const lower = resolve('/code/mira').replace(/^[A-Z]:/, (drive) => drive.toLowerCase());
+    assert.deepEqual(placeFor(`${lower}\\hub`), { system: 'mira', root: resolve('/code/mira') });
   });
 
   it('uses the working folder outside a repo', () => {
