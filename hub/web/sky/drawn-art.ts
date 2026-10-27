@@ -53,9 +53,11 @@ const ALONG_R = { x: -TW / 2, y: TH / 2 };
 const at = (c: number, r: number, up = 0): Point => ({ x: Math.round(ALONG_C.x * c + ALONG_R.x * r), y: Math.round(ALONG_C.y * c + ALONG_R.y * r - up) });
 const SWING_TOP = 18 * A;
 const SLIDE_TOP = 20 * A;
+const MAT_UP = 5 * A; // a trampoline's mat, above the ground
 const PLAYGROUND = {
   swings: { pivots: [at(0, -0.16, SWING_TOP), at(0, 0.16, SWING_TOP)], rope: 12 * A },
   slide: { ladder: at(-0.3, 0), top: at(-0.24, 0, SLIDE_TOP), foot: at(0.36, 0, A) },
+  trampoline: { spots: [at(0, -0.14, MAT_UP), at(0, 0.14, MAT_UP)] },
 };
 
 /** A pixel line from one point to another, `t` pixels thick. */
@@ -275,8 +277,9 @@ export function drawnArt(): Art {
     }
   }
 
-  // Where mirlings wait for me (decision 41): swings without their seats, which the scene hangs and
-  // swings, and a slide with its ladder at the back and its chute coming down towards the front.
+  // Where mirlings wait for me (decisions 41 and 49): swings without their seats, which the scene hangs
+  // and swings, a slide with its ladder at the back and its chute coming down towards the front, and a
+  // round trampoline on short legs, its mat ringed with striped padding.
   function playground() {
     const w = TW;
     const ground = (h: number) => ({ x: TW / 2, y: h - TH / 2 });
@@ -331,6 +334,34 @@ export function drawnArt(): Art {
         line(ctx, i % 6 < 3 ? '#ffd34d' : '#ffe08a', Math.round(x - side.x), Math.round(y - side.y), Math.round(x + side.x), Math.round(y + side.y), 1);
       }
       for (const s of [-1, 1]) line(ctx, '#e07a3f', t.x + s * side.x, t.y + s * side.y - A, f.x + s * side.x, f.y + s * side.y - A, A);
+    });
+
+    const th = MAT_UP + 4 * A + TH;
+    const tg = ground(th);
+    anchors.set(names.play('trampoline'), { ox: tg.x / w, oy: tg.y / th, height: tg.y - MAT_UP });
+    canvasTex(names.play('trampoline'), w, th, (ctx) => {
+      const cx = tg.x / A;
+      const cy = (tg.y - MAT_UP) / A;
+      const rx = 12;
+      const ry = 6;
+      // Four legs from under the rim, then the frame's edge, then the mat with its padding on top.
+      for (const [lx, ly] of [[-0.8, 0], [0.8, 0], [0, -0.8], [0, 0.8]] as const) {
+        const x = Math.round((cx + lx * rx) * A);
+        const y = Math.round((cy + ly * ry) * A);
+        line(ctx, lx < 0 || ly < 0 ? '#3a3f55' : '#555a70', x, y, x, y + MAT_UP, A);
+      }
+      const inside = (x: number, y: number, dy = 0) => ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy - dy) / ry) ** 2 <= 1;
+      for (let y = 0; y < th / A; y++) {
+        for (let x = 0; x < w / A; x++) {
+          if (inside(x, y, 1) && !inside(x, y)) rect(ctx, '#2c5a8f', x * A, y * A, A, A);
+          if (!inside(x, y)) continue;
+          const d = ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2;
+          const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+          const band = Math.floor((Math.atan2((y + 0.5 - cy) / ry, (x + 0.5 - cx) / rx) + Math.PI) / (Math.PI / 6)) % 2 === 0;
+          const colour = edge ? '#1f3a5c' : d > 0.5 ? (band ? '#4a90e2' : '#f4f1e6') : d < 0.15 && y + 0.5 < cy ? '#6a7396' : '#4f5778';
+          rect(ctx, colour, x * A, y * A, A, A);
+        }
+      }
     });
   }
 

@@ -12,11 +12,11 @@ const Building = z.string().regex(/^\d{1,2}$/);
 const Coordinate = z.number().int().min(1).max(8);
 
 export const SectionLayout = z.strictObject({
-  /** Ground painted as path, grass or flowers. */
-  ground: z.record(Place, z.enum(['p', 'g', 'f'])).optional(),
-  /** Plants and decorations, by kind; the page ignores kinds it doesn't know. */
+  /** Ground painted as path, grass or flowers, or dug as a pond (decision 49). */
+  ground: z.record(Place, z.enum(['p', 'g', 'f', 'w'])).optional(),
+  /** Plants, decorations and play pieces, by kind; the page ignores kinds it doesn't know. */
   placed: z.record(Place, z.string().regex(/^[a-z][a-z-]{0,23}$/)).optional(),
-  /** Trees the island planted that I took away. */
+  /** Trees, swings and slides the island planted that I took away or moved. */
   removed: z.array(Place).max(256).optional(),
   /** Buildings moved to another place in their section. */
   moved: z.record(Building, z.tuple([Coordinate, Coordinate])).optional(),

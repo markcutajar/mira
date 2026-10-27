@@ -40,8 +40,8 @@ export const names = {
   building: (type: 'library' | 'workshop', level: number) => `${type}.${level}`,
   /** Plants, decorations and things on the water placed in build mode (decisions 39 and 44); placed oaks and apple trees use `tree`. */
   item: (kind: Decoration) => `item.${kind}`,
-  /** Where mirlings wait for me (decision 41): the swings' frame, without its seats, and the slide. */
-  play: (kind: 'swings' | 'slide') => `play.${kind}`,
+  /** Where mirlings wait for me (decisions 41 and 49): the swings' frame, without its seats, the slide and the trampoline. */
+  play: (kind: 'swings' | 'slide' | 'trampoline') => `play.${kind}`,
   /** A rubber ring on the pond, in two halves so the mirling sits inside it. */
   ring: (half: 'back' | 'front') => `ring.${half}`,
   prop: (kind: Prop) => `prop.${kind}`,
@@ -79,10 +79,10 @@ export interface Art {
   readonly sizes: { creature: number; beacon: number; bubble: number; thought: number };
   /**
    * Where mirlings play on the playground's pictures: each swing seat's pivot under the frame and its
-   * rope's length, which the scene draws as it swings; and the foot of the slide's ladder, its top and
-   * the end of its chute.
+   * rope's length, which the scene draws as it swings; the foot of the slide's ladder, its top and
+   * the end of its chute; and where on a trampoline's mat each of its two jumpers stands.
    */
-  readonly playground: { swings: { pivots: Point[]; rope: number }; slide: { ladder: Point; top: Point; foot: Point } };
+  readonly playground: { swings: { pivots: Point[]; rope: number }; slide: { ladder: Point; top: Point; foot: Point }; trampoline: { spots: Point[] } };
   /** Starts loading any files, for art that comes from a pack. */
   preload?(scene: Phaser.Scene): void;
   /** Makes every named texture available to the scene. */

@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import { arrange, edit, move, placeOf, restyle, sameLayouts } from '../web/sky/build.ts';
+import { arrange, destinations, edit, move, movePiece, pieceAt, placeOf, restyle, sameLayouts, unreachable } from '../web/sky/build.ts';
 import { findPath, generateCells, SEC, sectionOrigin, slot, spotsAround, templateBuildings, type Cell } from '../web/sky/world.ts';
 
 describe('the island layout', () => {
@@ -141,6 +141,54 @@ describe('build mode', () => {
     assert.deepEqual(placeOf(c0 + 11, r0 + 2, 2), { i: 1, place: '-1,2', own: false });
     // A tile a layout already changed stays in that layout.
     assert.deepEqual(placeOf(c0 + 11, r0 + 2, 2, 0), { i: 0, place: '11,2', own: false });
+  });
+
+  it('puts up, moves and takes away play pieces, the template\'s own included', () => {
+    const cells = generateCells(['code']);
+    assert.deepEqual([at(cells, 8, 4).ch, at(cells, 8, 6).ch], ['S', 'D']); // the template's swings and slide
+    assert.deepEqual(edit(undefined, 'trampoline', at(cells, 1, 1), '1,1'), { layout: { placed: { '1,1': 'trampoline' } } });
+    assert.ok('refused' in edit(undefined, 'slide', at(cells, 3, 5), '3,5', true)); // the pond
+    assert.deepEqual(edit(undefined, 'remove', at(cells, 8, 4), '8,4'), { layout: { removed: ['8,4'] } });
+    const moved = movePiece(undefined, 'slide', '8,6', at(cells, 1, 2), '1,2');
+    assert.deepEqual(moved, { layout: { removed: ['8,6'], placed: { '1,2': 'slide' } } });
+    assert.ok('refused' in movePiece(undefined, 'slide', '8,6', at(cells, 2, 3), '2,3')); // the library stands there
+    const layout = { removed: ['8,6'], placed: { '1,2': 'slide', '1,1': 'trampoline' } };
+    arrange(cells, 0, 'code', layout);
+    assert.deepEqual([at(cells, 8, 6).ch, at(cells, 8, 6).walk, at(cells, 1, 2).ch, at(cells, 1, 1).ch, at(cells, 1, 1).walk], ['g', true, 'D', 'J', false]);
+    assert.deepEqual([pieceAt(at(cells, 1, 1)), pieceAt(at(cells, 8, 4)), pieceAt(at(cells, 2, 2))], ['trampoline', 'swings', undefined]);
+    // One I put up moves off its own place rather than being listed as taken away.
+    assert.deepEqual(movePiece(layout, 'trampoline', '1,1', at(cells, 3, 1), '3,1'), { layout: { removed: ['8,6'], placed: { '1,2': 'slide', '3,1': 'trampoline' } } });
+  });
+
+  it('digs ponds and fills them in, but never a stream', () => {
+    const cells = generateCells(['code', 'code']);
+    const coast = [...cells.values()].find((c) => c.section === null && c.ch === 'g' && c.c === c0 - 2) as Cell;
+    const out = `-2,${coast.r - r0}`;
+    assert.deepEqual(edit(undefined, 'water', at(cells, 1, 1), '1,1', true), { layout: { ground: { '1,1': 'w' } } });
+    assert.deepEqual(edit(undefined, 'grass', at(cells, 3, 5), '3,5', true), { layout: { ground: { '3,5': 'g' } } }); // the template's pond
+    assert.ok('refused' in edit(undefined, 'water', at(cells, 3, 5), '3,5', true)); // water already
+    assert.ok('refused' in edit(undefined, 'grass', at(cells, 10, 1), '10,1')); // a stream
+    arrange(cells, 0, 'code', { ground: { '1,1': 'w', '3,5': 'g', [out]: 'w', '10,1': 'g' } });
+    assert.deepEqual([at(cells, 1, 1).ch, at(cells, 1, 1).walk, at(cells, 3, 5).ch, at(cells, 3, 5).walk, coast.ch], ['w', false, 'g', true, 'w']);
+    assert.equal(at(cells, 10, 1).ch, 'w'); // a stream stays, whatever a layout says
+    // Water I dug on the coast can be filled in again.
+    assert.deepEqual(edit({ ground: { [out]: 'w' } }, 'flowers', coast, out), { layout: { ground: { [out]: 'f' } } });
+  });
+
+  it('notices a building or play piece left with no way in', () => {
+    const cells = generateCells(['code']);
+    const everything = () => destinations(cells, [arrange(cells, 0, 'code')]);
+    assert.deepEqual(unreachable(cells, everything()), []);
+    // Water all round the library, which stands at 2,3.
+    const ring = ['1,2', '2,2', '3,2', '1,3', '3,3', '1,4', '2,4', '3,4'];
+    const walled = generateCells(['code']);
+    const placed = arrange(walled, 0, 'code', { ground: Object.fromEntries(ring.map((p) => [p, 'w' as const])) });
+    assert.deepEqual(unreachable(walled, destinations(walled, [placed])).map((d) => d.label), ['library']);
+    // A play piece counts too: a trampoline in the corner, with water on the shore and ground around it.
+    const corner = generateCells(['code']);
+    const round = ['0,0', '1,0', '2,0', '0,1', '0,2', '1,2', '2,2'];
+    const pieces = arrange(corner, 0, 'code', { placed: { '1,1': 'trampoline' }, ground: Object.fromEntries(round.map((p) => [p, 'w' as const])) });
+    assert.ok(unreachable(corner, destinations(corner, [pieces])).some((d) => d.label === 'trampoline'));
   });
 
   it('treats layouts as the same whatever order their keys came in', () => {

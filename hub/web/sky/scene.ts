@@ -5,7 +5,7 @@
 import type { MiraEvent } from '../../../contracts/src/index.ts';
 import { sessionLabel, type BoardSession } from '../shared/format.ts';
 import { ACCENT_COLOUR, ACCENTS, MAX_LEVEL, names, WATERFALL_FRAMES, type Accent, type Art, type Decoration, type Edge, type HouseStyle, type Palette } from './art.ts';
-import { arrange, BUILDING_LABEL, edit, isItem, ITEMS, move, onWater, placeOf, restyle, sameLayouts, type ItemKind, type Outcome, type Placed, type SectionLayout, type Tool, type Where } from './build.ts';
+import { arrange, BUILDING_LABEL, destinations, edit, isItem, isPiece, ITEMS, move, movePiece, onWater, pieceAt, PIECES, placeOf, restyle, sameLayouts, unreachable, type ItemKind, type Outcome, type PieceKind, type Placed, type SectionLayout, type Tool, type Where } from './build.ts';
 import { findPath, generateCells, hash, SEC, sectionOrigin, spotsAround, type BuildingType, type Cell, type Spot, type Template } from './world.ts';
 
 type Status = 'working' | 'needs-me' | 'my-turn' | 'failed' | 'ended';
@@ -42,10 +42,15 @@ interface Section {
   play: Playground;
 }
 
-/** Where a section's mirlings wait for me (decision 41): its swings, its slide and its pond. */
+type SwingSet = Spot & { x: number; y: number; ropes: Phaser.GameObjects.Graphics; seats: Array<Mirling | null> };
+/** A slide or a trampoline, and who's on it. */
+type Ride = Spot & { x: number; y: number; users: Set<Mirling> };
+
+/** Where a section's mirlings wait for me (decisions 41 and 49): its swings, slides and trampolines, however many I've put up, and its pond. */
 interface Playground {
-  swings?: Spot & { x: number; y: number; ropes: Phaser.GameObjects.Graphics; seats: Array<Mirling | null> };
-  slide?: Spot & { x: number; y: number; users: Set<Mirling> };
+  swings: SwingSet[];
+  slides: Ride[];
+  trampolines: Ride[];
   pond: Spot[];
   floating: Set<Mirling>;
 }
@@ -54,8 +59,9 @@ interface Playground {
 type Act = 'read' | 'make' | 'run' | 'think';
 
 type Play =
-  | { kind: 'swing'; seat: number; seated: boolean; from: number; swing: { amp: number } }
-  | { kind: 'slide' }
+  | { kind: 'swing'; frame: SwingSet; seat: number; seated: boolean; from: number; swing: { amp: number } }
+  | { kind: 'slide'; ride: Ride }
+  | { kind: 'bounce'; ride: Ride; spot: number }
   | { kind: 'float'; back: Image; front: Image };
 
 /** A project's recent commits and the building levels they earn, as the hub sends them. */
@@ -138,6 +144,15 @@ interface Target {
   where: Where;
   cell: Cell;
   building?: Building;
+  piece?: PieceKind;
+}
+
+/** A play piece picked up in build mode, to put down somewhere else in its layout. */
+interface PickedPiece {
+  piece: PieceKind;
+  c: number;
+  r: number;
+  where: Where;
 }
 
 // Where a placed picture stands on its tile, in art pixels below the tile's centre. Lily pads lie
@@ -158,6 +173,8 @@ const POND_FLOATERS = 5;
 // Water lies this many art pixels below the ground, so streams and ponds have banks.
 const WATER_DROP = 3;
 const SLIDERS = 2;
+/** How many mirlings bounce on one trampoline at once. */
+const JUMPERS = 2;
 const DPR = () => Math.min(window.devicePixelRatio || 1, 3);
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
@@ -193,7 +210,9 @@ export class SkyScene extends Phaser.Scene {
   /** How I arranged each project's section, and where its buildings stand as a result (decision 39). */
   #layouts: Record<string, SectionLayout> = {};
   #placements = new Map<string, Placed[]>();
-  #build: { on: boolean; tool: Tool; picked: Building | null } = { on: false, tool: 'tree', picked: null };
+  #build: { on: boolean; tool: Tool; picked: Building | PickedPiece | null } = { on: false, tool: 'tree', picked: null };
+  /** Each play piece's picture, by tile, to light up the one picked up. */
+  #pieceImages = new Map<string, Image>();
   #undo: Array<{ name: string; layout: SectionLayout | undefined }> = [];
   #cursor!: Image;
   #ghost!: Image;
@@ -315,7 +334,8 @@ export class SkyScene extends Phaser.Scene {
   /** A picture of what a tool places, for the palette; null until the art is drawn, or for tools that place nothing. */
   preview(tool: Tool): string | null {
     if (!this.#ready) return null;
-    const key = tool === 'path' ? names.tile('path') : tool === 'grass' ? names.tile('grass0') : tool === 'flowers' ? names.tile('flowers') : isItem(tool) ? this.#itemLook(tool).key : null;
+    const key = tool === 'path' ? names.tile('path') : tool === 'grass' ? names.tile('grass0') : tool === 'flowers' ? names.tile('flowers') : tool === 'water' ? names.tile('water')
+      : isItem(tool) ? this.#itemLook(tool).key : isPiece(tool) ? names.play(tool) : null;
     return key ? this.textures.getBase64(key) : null;
   }
 
@@ -455,9 +475,7 @@ export class SkyScene extends Phaser.Scene {
     const { pivots, rope } = this.#art.playground.swings;
     const across = { x: 0.894, y: 0.447 }; // one step along a column, on screen: the way the seats swing
     const side = { x: -0.894 * 4, y: 0.447 * 4 }; // half a seat, along the frame
-    for (const sec of this.#sections) {
-      const sw = sec.play.swings;
-      if (!sw) continue;
+    for (const sw of this.#sections.flatMap((sec) => sec.play.swings)) {
       sw.ropes.clear();
       pivots.forEach((pivot, i) => {
         const rider = sw.seats[i];
@@ -502,7 +520,7 @@ export class SkyScene extends Phaser.Scene {
     for (const col of [...this.#mirlings.values()]) this.#retire(col, true);
     for (const sec of this.#sections) {
       for (const b of sec.buildings) b.img.destroy();
-      sec.play.swings?.ropes.destroy();
+      for (const sw of sec.play.swings) sw.ropes.destroy();
       sec.label.destroy();
       sec.summary.destroy();
     }
@@ -565,6 +583,7 @@ export class SkyScene extends Phaser.Scene {
     const known = new Set(this.#cells.keys());
     for (const obj of this.#ground) obj.destroy();
     this.#ground = [];
+    this.#pieceImages.clear();
     this.#cells = generateCells(this.#order.map((name) => this.#templates.get(name) ?? 'code'));
     this.#placements.clear();
     this.#order.forEach((name, i) => this.#placements.set(name, arrange(this.#cells, i, this.#templates.get(name) ?? 'code', this.#layouts[name])));
@@ -599,10 +618,11 @@ export class SkyScene extends Phaser.Scene {
           this.#falls.push({ img, edge });
           extra.push(img);
         }
-      } else if (cell.ch === 'S' || cell.ch === 'D') {
-        const key = names.play(cell.ch === 'S' ? 'swings' : 'slide');
+      } else if (pieceAt(cell)) {
+        const key = names.play(pieceAt(cell) as PieceKind);
         const a = this.#art.anchor(key);
         deco = this.add.image(x, y, key).setOrigin(a.ox, a.oy).setDepth(y);
+        this.#pieceImages.set(`${cell.c},${cell.r}`, deco);
       } else if (cell.ch === 'T') {
         deco = this.add.image(x, y + 3 * A, names.tree(hash(cell.c, cell.r, 4) < 0.4)).setOrigin(0.5, 1).setDepth(y + 3 * A);
       }
@@ -676,16 +696,20 @@ export class SkyScene extends Phaser.Scene {
     this.#sections.push(sec);
   }
 
-  // A section's swings, slide and pond, from its template's tiles.
-  #playgroundOf(i: number): Playground {
-    const play: Playground = { pond: [], floating: new Set() };
+  // A section's swings, slides, trampolines and pond, wherever its template and my layout put them.
+  // A piece that stayed put is kept as it was, with whoever is on it.
+  #playgroundOf(i: number, old?: Playground): Playground {
+    const play: Playground = { swings: [], slides: [], trampolines: [], pond: [], floating: old?.floating ?? new Set() };
     const { c0, r0 } = sectionOrigin(i);
+    const kept = <T extends Spot>(list: T[] | undefined, cell: Cell) => list?.find((p) => p.c === cell.c && p.r === cell.r);
     for (const cell of this.#cells.values()) {
-      if (cell.section !== i) continue;
+      if ((cell.by ?? cell.section) !== i) continue;
       const { x, y } = this.#tileXY(cell.c, cell.r);
       const spot = { c: cell.c, r: cell.r };
-      if (cell.ch === 'S') play.swings = { ...spot, x, y, seats: this.#art.playground.swings.pivots.map(() => null), ropes: this.add.graphics().setDepth(y + 0.5) };
-      if (cell.ch === 'D') play.slide = { ...spot, x, y, users: new Set() };
+      const piece = pieceAt(cell);
+      if (piece === 'swings') play.swings.push(kept(old?.swings, cell) ?? { ...spot, x, y, seats: this.#art.playground.swings.pivots.map(() => null), ropes: this.add.graphics().setDepth(y + 0.5) });
+      if (piece === 'slide') play.slides.push(kept(old?.slides, cell) ?? { ...spot, x, y, users: new Set() });
+      if (piece === 'trampoline') play.trampolines.push(kept(old?.trampolines, cell) ?? { ...spot, x, y, users: new Set() });
       const inside = [cell.c - c0, cell.r - r0].every((v) => v > 0 && v < SEC - 1);
       if (cell.ch === 'w' && inside) play.pond.push(spot);
     }
@@ -918,8 +942,8 @@ export class SkyScene extends Phaser.Scene {
     col.act = null;
     const play = col.play;
     const pg = col.sec.play;
-    if (play?.kind === 'swing' && pg.swings) pg.swings.seats[play.seat] = null;
-    if (play?.kind === 'slide') pg.slide?.users.delete(col);
+    if (play?.kind === 'swing') play.frame.seats[play.seat] = null;
+    if (play?.kind === 'slide' || play?.kind === 'bounce') play.ride.users.delete(col);
     if (play?.kind === 'float') {
       play.back.destroy();
       play.front.destroy();
@@ -930,13 +954,16 @@ export class SkyScene extends Phaser.Scene {
 
   // -- waiting for me (decision 41) --
 
-  /** Picks something to play at: a free swing, the slide or the pond, and now and then something else. */
+  /** Picks something to play at: a free swing, a slide, a trampoline or the pond, and now and then something else. */
   #chill(col: Mirling): void {
     const pg = col.sec.play;
-    const seat = pg.swings ? pg.swings.seats.indexOf(null) : -1;
     const choices: Array<() => void> = [];
-    if (seat >= 0) choices.push(() => this.#swing(col, seat), () => this.#swing(col, seat));
-    if (pg.slide && pg.slide.users.size < SLIDERS) choices.push(() => this.#slide(col));
+    for (const sw of pg.swings) {
+      const seat = sw.seats.indexOf(null);
+      if (seat >= 0) choices.push(() => this.#swing(col, sw, seat), () => this.#swing(col, sw, seat));
+    }
+    for (const sl of pg.slides) if (sl.users.size < SLIDERS) choices.push(() => this.#slide(col, sl));
+    for (const tr of pg.trampolines) if (tr.users.size < JUMPERS) choices.push(() => this.#bounce(col, tr), () => this.#bounce(col, tr));
     if (this.#openWater(pg).length && pg.floating.size < POND_FLOATERS) choices.push(() => this.#float(col), () => this.#float(col));
     if (!choices.length) return this.#walkTo(col, col.home.door); // nowhere free: it waits at home
     pickOne(choices)();
@@ -955,12 +982,11 @@ export class SkyScene extends Phaser.Scene {
     return spots.sort((a, b) => d(a) - d(b));
   }
 
-  #swing(col: Mirling, seat: number): void {
-    const sw = col.sec.play.swings;
+  #swing(col: Mirling, sw: SwingSet, seat: number): void {
     const pivot = this.#art.playground.swings.pivots[seat];
-    const from = sw && pivot ? this.#beside(sw, { x: sw.x + pivot.x, y: sw.y })[0] : undefined;
-    if (!sw || !pivot || !from) return this.#walkTo(col, col.home.door);
-    const play: Play = { kind: 'swing', seat, seated: false, from: 0, swing: { amp: 0 } };
+    const from = pivot ? this.#beside(sw, { x: sw.x + pivot.x, y: sw.y })[0] : undefined;
+    if (!pivot || !from) return this.#walkTo(col, col.home.door);
+    const play: Play = { kind: 'swing', frame: sw, seat, seated: false, from: 0, swing: { amp: 0 } };
     sw.seats[seat] = col;
     col.play = play;
     this.#walkTo(col, from, () => {
@@ -973,15 +999,13 @@ export class SkyScene extends Phaser.Scene {
   }
 
   // Up the ladder, a moment at the top, down the chute, off at the front, and round again.
-  #slide(col: Mirling): void {
-    const sl = col.sec.play.slide;
-    if (!sl) return;
+  #slide(col: Mirling, sl: Ride): void {
     const { ladder, top, foot } = this.#art.playground.slide;
     const at = (p: { x: number; y: number }) => ({ x: sl.x + p.x, y: sl.y + p.y });
     const back = this.#beside(sl, at(ladder))[0];
     const front = this.#beside(sl, at(foot))[0];
     if (!back || !front) return this.#walkTo(col, col.home.door);
-    const play: Play = { kind: 'slide' };
+    const play: Play = { kind: 'slide', ride: sl };
     sl.users.add(col);
     col.play = play;
     const still = () => col.play === play && !col.removed;
@@ -999,6 +1023,27 @@ export class SkyScene extends Phaser.Scene {
       } }));
     }));
     round();
+  }
+
+  // Up onto a free spot on the trampoline's mat, then bouncing on it until I reply.
+  #bounce(col: Mirling, tr: Ride): void {
+    const { spots } = this.#art.playground.trampoline;
+    const taken = new Set([...tr.users].map((m) => (m.play?.kind === 'bounce' ? m.play.spot : -1)));
+    const spot = spots.findIndex((_, k) => !taken.has(k));
+    const mat = spots[spot];
+    const on = mat && { x: tr.x + mat.x, y: tr.y + mat.y };
+    const from = on ? this.#beside(tr, on)[0] : undefined;
+    if (!on || !from) return this.#walkTo(col, col.home.door);
+    const play: Play = { kind: 'bounce', ride: tr, spot };
+    tr.users.add(col);
+    col.play = play;
+    const A = this.#art.scale;
+    this.#walkTo(col, from, () => this.#hop(col, on, () => {
+      if (col.play !== play || col.removed) return;
+      Object.assign(col, { aloft: true, depth: tr.y + 2 });
+      if (reduceMotion) return;
+      this.#track(col, this.tweens.add({ targets: col.pos, y: on.y - 10 * A, duration: 340, ease: 'Quad.easeOut', yoyo: true, repeat: -1, repeatDelay: 80, delay: rand(0, 400) }));
+    }));
   }
 
   // Into the pond on a rubber ring, drifting from tile to tile.
@@ -1310,6 +1355,7 @@ export class SkyScene extends Phaser.Scene {
   // mirlings carry on from wherever they are.
   #rearrange(): void {
     this.#buildGround(false);
+    const changedPonds = new Set<Section>();
     for (const sec of this.#sections) {
       const placed = this.#placements.get(sec.name) ?? [];
       for (const b of sec.buildings) {
@@ -1324,6 +1370,22 @@ export class SkyScene extends Phaser.Scene {
         b.spots = spotsAround(b, this.#walkable);
         b.door = b.spots[0] ?? b;
       }
+      // Play pieces taken away lose their ropes. Anyone on a piece moved or taken away, or floating on a
+      // pond I dug out or filled in, finds something else to do.
+      const old = sec.play;
+      sec.play = this.#playgroundOf(sec.i, old);
+      for (const sw of old.swings) if (!sec.play.swings.includes(sw)) sw.ropes.destroy();
+      const tiles = (pond: Spot[]) => pond.map((s) => `${s.c},${s.r}`).sort().join(' ');
+      if (tiles(old.pond) !== tiles(sec.play.pond)) changedPonds.add(sec);
+    }
+    for (const col of this.#mirlings.values()) {
+      const p = col.play;
+      const pg = col.sec.play;
+      const gone = (p?.kind === 'swing' && !pg.swings.includes(p.frame)) || ((p?.kind === 'slide' || p?.kind === 'bounce') && !pg.slides.includes(p.ride) && !pg.trampolines.includes(p.ride))
+        || (p?.kind === 'float' && changedPonds.has(col.sec));
+      if (!gone) continue;
+      this.#stopActing(col);
+      if (col.status === 'my-turn') this.#chill(col);
     }
   }
 
@@ -1347,15 +1409,23 @@ export class SkyScene extends Phaser.Scene {
     const where = cell ? placeOf(spot.c, spot.r, this.#sections.length, cell.by) : null;
     const sec = where ? this.#sections[where.i] : undefined;
     if (!where || !sec || !cell) return null;
-    return { sec, where, cell, building: sec.buildings.find((b) => b.c === spot.c && b.r === spot.r) };
+    return { sec, where, cell, building: sec.buildings.find((b) => b.c === spot.c && b.r === spot.r), piece: pieceAt(cell) };
   }
 
-  /** What the current tool would do on a tile: a new layout, a building picked up, or why not. */
-  #outcome(t: Target): Outcome | { pick: Building } {
+  /** What the current tool would do on a tile: a new layout, a building or play piece picked up, or why not. */
+  #outcome(t: Target): Outcome | { pick: Building | PickedPiece } {
     const { tool, picked } = this.#build;
     const layout = this.#layouts[t.sec.name];
     if (tool === 'move') {
-      if (!picked) return t.building ? { pick: t.building } : { refused: 'Click a building to pick it up.' };
+      if (!picked) {
+        if (t.building) return { pick: t.building };
+        return t.piece ? { pick: { piece: t.piece, c: t.cell.c, r: t.cell.r, where: t.where } } : { refused: 'Click a building or a play piece to pick it up.' };
+      }
+      if ('piece' in picked) {
+        if (picked.c === t.cell.c && picked.r === t.cell.r) return { pick: picked };
+        if (t.where.i !== picked.where.i) return { refused: "A play piece stays in its own project's part of the island." };
+        return movePiece(layout, picked.piece, picked.where.place, t.cell, t.where.place);
+      }
       if (t.building === picked) return { pick: picked };
       if (t.where.own && !t.sec.buildings.includes(picked)) return { refused: "A building stays in its own project's section." };
       return move(layout, buildingIndex(picked), t.cell, t.where);
@@ -1365,7 +1435,19 @@ export class SkyScene extends Phaser.Scene {
       return restyle(layout, buildingIndex(t.building), t.building.style);
     }
     if (t.building) return { refused: tool === 'remove' ? 'Buildings stay, since they stand for real work. Move them instead.' : 'A building stands here.' };
-    return edit(layout, tool, t.cell, t.where.place);
+    return edit(layout, tool, t.cell, t.where.place, t.where.own);
+  }
+
+  // The building or play piece a change would leave with no way in, if any. The island is laid again
+  // with the new layout and checked against how it stands now, so a corner that was already shut off
+  // doesn't stop me.
+  #cutsOff(name: string, layout: SectionLayout): string | null {
+    const before = new Set(unreachable(this.#cells, destinations(this.#cells, [...this.#placements.values()])).map((d) => d.key));
+    const templates = this.#order.map((n) => this.#templates.get(n) ?? 'code');
+    const cells = generateCells(templates);
+    const layouts = { ...this.#layouts, [name]: layout };
+    const placements = this.#order.map((n, i) => arrange(cells, i, templates[i] ?? 'code', layouts[n]));
+    return unreachable(cells, destinations(cells, placements)).find((d) => !before.has(d.key))?.label ?? null;
   }
 
   #buildHover(p: Phaser.Input.Pointer): void {
@@ -1384,6 +1466,9 @@ export class SkyScene extends Phaser.Scene {
     if (ok && isItem(tool)) {
       const look = this.#itemLook(tool);
       this.#ghost.setTexture(look.key).setOrigin(look.ox, look.oy).setPosition(x, y + look.drop).setDepth(y + look.drop + 0.5).setVisible(true);
+    } else if (ok && isPiece(tool)) {
+      const a = this.#art.anchor(names.play(tool));
+      this.#ghost.setTexture(names.play(tool)).setOrigin(a.ox, a.oy).setPosition(x, y).setDepth(y + 0.5).setVisible(true);
     } else {
       this.#ghost.setVisible(false);
     }
@@ -1395,16 +1480,20 @@ export class SkyScene extends Phaser.Scene {
     const result = this.#outcome(t);
     if ('pick' in result) return this.#pick(result.pick === this.#build.picked ? null : result.pick);
     if ('refused' in result) return this.#hint(result.refused);
+    const shut = this.#cutsOff(t.sec.name, result.layout);
+    if (shut) return this.#hint(`That would cut off the ${shut}. Leave it a way in.`);
     this.#pick(null);
     this.#setLayout(t.sec.name, result.layout, true);
     this.#hint(this.#toolHint());
   }
 
-  #pick(b: Building | null): void {
-    this.#build.picked?.img.clearTint();
+  #pick(b: Building | PickedPiece | null): void {
+    const imageOf = (p: Building | PickedPiece) => ('piece' in p ? this.#pieceImages.get(`${p.c},${p.r}`) : p.img);
+    if (this.#build.picked) imageOf(this.#build.picked)?.clearTint();
     this.#build.picked = b;
-    b?.img.setTint(0xffe08a);
-    if (b) this.#hint(`Now click a free tile for the ${BUILDING_LABEL[b.type]}, or click it again to put it back.`);
+    if (b) imageOf(b)?.setTint(0xffe08a);
+    const label = b && ('piece' in b ? PIECES[b.piece].label.toLowerCase() : BUILDING_LABEL[b.type]);
+    if (label) this.#hint(`Now click a free tile for the ${label}, or click it again to put it back.`);
     else if (this.#build.on) this.#hint(this.#toolHint());
   }
 
@@ -1414,10 +1503,12 @@ export class SkyScene extends Phaser.Scene {
 
   #toolHint(): string {
     const { tool } = this.#build;
-    if (tool === 'move') return 'Click a building, then a free tile on its own ground.';
+    if (tool === 'move') return 'Click a building or a play piece, then a free tile. Buildings stay on their own ground.';
     if (tool === 'restyle') return 'Click a house to change its style.';
-    if (tool === 'remove') return 'Click a tree, plant or decoration to take it away.';
+    if (tool === 'remove') return 'Click a tree, plant, decoration or play piece to take it away.';
+    if (tool === 'water') return 'Click land to dig a pond. Paint path, grass or flowers on a pond to fill it in.';
     if (tool === 'path' || tool === 'grass' || tool === 'flowers') return `Click tiles anywhere on the island to make them ${tool}.`;
+    if (isPiece(tool)) return `Click a free tile anywhere on the island to put up ${tool === 'swings' ? 'swings' : `a ${tool}`}. Mirlings play there while they wait for you.`;
     if (onWater(tool)) return tool === 'boat' ? 'Click a stream or pond to put a boat on it.' : 'Click a stream or pond to float lily pads on it.';
     const label = ITEMS[tool].label.toLowerCase();
     const what = label.endsWith('s') ? label : `${/^[aeiou]/.test(label) ? 'an' : 'a'} ${label}`;

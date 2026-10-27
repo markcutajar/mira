@@ -369,7 +369,7 @@ describe('hub server', () => {
   it('keeps how I arranged a section and the island around it, for every browser', async () => {
     const put = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const layouts = async () => ((await (await fetch(`${base}/api/layouts`)).json()) as { layouts: unknown }).layouts;
-    const layout = { placed: { '1,1': 'bench', '9,1': 'rock', '-3,12': 'boat' }, ground: { '0,4': 'f' }, moved: { 0: [3, 4] }, styles: { 0: 'stone' } };
+    const layout = { placed: { '1,1': 'bench', '9,1': 'rock', '-3,12': 'boat', '2,1': 'trampoline' }, ground: { '0,4': 'f', '2,2': 'w' }, removed: ['8,4'], moved: { 0: [3, 4] }, styles: { 0: 'stone' } };
     assert.equal((await put('/api/layouts/mira', layout)).status, 204);
     assert.deepEqual(await layouts(), { mira: layout });
     assert.equal((await put('/api/layouts/mira', { placed: { '-4,1': 'bench' } })).status, 400); // beyond its reach

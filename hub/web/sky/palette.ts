@@ -1,8 +1,8 @@
-// Build mode's palette (decision 39): choose a plant, a decoration, a kind of ground or a way to
-// arrange the buildings, then click the island. Every change is kept as it's made.
+// Build mode's palette (decisions 39 and 49): choose a plant, a decoration, a play piece, a kind of
+// ground or a way to arrange things, then click the island. Every change is kept as it's made.
 
 import { esc } from '../shared/format.ts';
-import { ITEMS, type ItemGroup, type ItemKind, type Tool } from './build.ts';
+import { ITEMS, PIECES, type ItemGroup, type ItemKind, type PieceKind, type Tool } from './build.ts';
 
 export interface PaletteOptions {
   /** A picture of what a tool places, if it places something. */
@@ -23,7 +23,8 @@ const GROUPS: Array<{ name: string; tools: Array<{ tool: Tool; label: string }> 
   { name: 'Plants', tools: items('Plants') },
   { name: 'Decor', tools: items('Decor') },
   { name: 'Water', tools: items('Water') },
-  { name: 'Ground', tools: [{ tool: 'path', label: 'Path' }, { tool: 'grass', label: 'Grass' }, { tool: 'flowers', label: 'Flowers' }] },
+  { name: 'Play', tools: (Object.keys(PIECES) as PieceKind[]).map((tool) => ({ tool, label: PIECES[tool].label })) },
+  { name: 'Ground', tools: [{ tool: 'path', label: 'Path' }, { tool: 'grass', label: 'Grass' }, { tool: 'flowers', label: 'Flowers' }, { tool: 'water', label: 'Pond' }] },
   { name: 'Arrange', tools: [{ tool: 'move', label: 'Move' }, { tool: 'restyle', label: 'Restyle' }, { tool: 'remove', label: 'Remove' }] },
 ];
 
