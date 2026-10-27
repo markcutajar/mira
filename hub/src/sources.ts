@@ -1,6 +1,6 @@
-// What an agent source plugs into the hub (decision 22). Claude Code is the first; any other
-// agent joins by providing the same pieces. Every piece is optional, so a source can start with
-// ingest alone and add discovery or a story panel later.
+// What an agent source plugs into the hub (decision 22). Claude Code is built in; any other agent
+// joins through a connector outside this repo that provides the same pieces (decision 50). Every
+// piece is optional, so a source can start with ingest alone and add discovery or a story panel later.
 
 import type { MiraEvent, Status } from '../../contracts/src/index.ts';
 import type { SessionView } from './roster.ts';

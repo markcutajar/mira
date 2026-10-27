@@ -22,6 +22,18 @@ describe('MiraEvent', () => {
     assert.equal(MiraEvent.safeParse(sessionEvent).success, true);
   });
 
+  it("accepts a subagent's usage report", () => {
+    const event = {
+      ...sessionEvent,
+      actor: { kind: 'subagent', id: 'agent-7', parent: sessionEvent.actor.id, name: 'Explore' },
+      type: 'usage.reported',
+      status: undefined,
+      detail: { model: 'claude-opus-5-5' },
+      usage: { inputTokens: 1200, outputTokens: 300, costUsd: 0.02 },
+    };
+    assert.equal(MiraEvent.safeParse(event).success, true);
+  });
+
   it("accepts any agent's source ID, but only in its short form", () => {
     assert.equal(MiraEvent.safeParse({ ...sessionEvent, source: 'codex-cli' }).success, true);
     assert.equal(MiraEvent.safeParse({ ...sessionEvent, source: 'Codex CLI' }).success, false);

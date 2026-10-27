@@ -31,7 +31,6 @@ interface Section {
   i: number;
   name: string;
   accent: Accent;
-  template: Template;
   buildings: Building[];
   houses: Building[];
   anchor: { x: number; y: number };
@@ -187,7 +186,6 @@ export class SkyScene extends Phaser.Scene {
   #pending: { sessions: BoardSession[]; systems: string[]; labels: Record<string, string>; growth: Record<string, SectionGrowth> } | null = null;
   /** Projects I removed, taken off the island once the hub confirms they're gone. */
   #order: string[] = [];
-  #templates = new Map<string, Template>();
   #sections: Section[] = [];
   #mirlings = new Map<string, Mirling>();
   #cells = new Map<string, Cell>();
@@ -584,9 +582,9 @@ export class SkyScene extends Phaser.Scene {
     for (const obj of this.#ground) obj.destroy();
     this.#ground = [];
     this.#pieceImages.clear();
-    this.#cells = generateCells(this.#order.map((name) => this.#templates.get(name) ?? 'code'));
+    this.#cells = generateCells(this.#order.map((): Template => 'code'));
     this.#placements.clear();
-    this.#order.forEach((name, i) => this.#placements.set(name, arrange(this.#cells, i, this.#templates.get(name) ?? 'code', this.#layouts[name])));
+    this.#order.forEach((name, i) => this.#placements.set(name, arrange(this.#cells, i, 'code', this.#layouts[name])));
     const { w, h, side } = this.#art.tile;
     const A = this.#art.scale;
     const fresh: Image[] = [];
@@ -665,11 +663,10 @@ export class SkyScene extends Phaser.Scene {
 
   #buildSection(i: number, animate: boolean): void {
     const name = this.#order[i] as string;
-    const template = this.#templates.get(name) ?? 'code';
     const accent = ACCENTS[i % ACCENTS.length] as Accent;
     const A = this.#art.scale;
-    const sec: Section = { i, name, accent, template, buildings: [], houses: [], anchor: { x: 0, y: 0 }, label: null as unknown as Text, summary: null as unknown as Text, play: this.#playgroundOf(i) };
-    for (const tb of this.#placements.get(name) ?? arrange(new Map(), i, template)) {
+    const sec: Section = { i, name, accent, buildings: [], houses: [], anchor: { x: 0, y: 0 }, label: null as unknown as Text, summary: null as unknown as Text, play: this.#playgroundOf(i) };
+    for (const tb of this.#placements.get(name) ?? arrange(new Map(), i, 'code')) {
       const { x, y } = this.#tileXY(tb.c, tb.r);
       const img = this.add.image(x, y, names.select).setDepth(y);
       const spots = spotsAround(tb, this.#walkable);
@@ -1443,10 +1440,9 @@ export class SkyScene extends Phaser.Scene {
   // doesn't stop me.
   #cutsOff(name: string, layout: SectionLayout): string | null {
     const before = new Set(unreachable(this.#cells, destinations(this.#cells, [...this.#placements.values()])).map((d) => d.key));
-    const templates = this.#order.map((n) => this.#templates.get(n) ?? 'code');
-    const cells = generateCells(templates);
+    const cells = generateCells(this.#order.map((): Template => 'code'));
     const layouts = { ...this.#layouts, [name]: layout };
-    const placements = this.#order.map((n, i) => arrange(cells, i, templates[i] ?? 'code', layouts[n]));
+    const placements = this.#order.map((n, i) => arrange(cells, i, 'code', layouts[n]));
     return unreachable(cells, destinations(cells, placements)).find((d) => !before.has(d.key))?.label ?? null;
   }
 

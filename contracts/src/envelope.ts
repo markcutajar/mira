@@ -6,7 +6,7 @@ import * as z from 'zod';
 
 export const CONTRACT_VERSION = 1;
 
-/** The agent an event came from (decision 22): `claude-code` today, any agent tomorrow. */
+/** The agent an event came from (decision 22): `claude-code`, or any agent a connector brings (decision 50). */
 export const Source = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, 'lower-case letters, digits and dashes');
 export type Source = z.infer<typeof Source>;
 
