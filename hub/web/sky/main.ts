@@ -99,7 +99,6 @@ const sidebar = createSidebar(side, {
     scene.focusSession(id);
   },
   onProject: (name) => scene.focusSection(name),
-  onRemoved: (kind, key) => { if (kind === 'system') scene.forget(key); },
 });
 
 // A session that needs me, fails or finishes a long turn while I'm elsewhere says so (decision 45).

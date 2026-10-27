@@ -166,7 +166,6 @@ export class SkyScene extends Phaser.Scene {
   #ready = false;
   #pending: { sessions: BoardSession[]; systems: string[]; labels: Record<string, string>; growth: Record<string, SectionGrowth> } | null = null;
   /** Projects I removed, taken off the island once the hub confirms they're gone. */
-  #forget = new Set<string>();
   #order: string[] = [];
   #templates = new Map<string, Template>();
   #sections: Section[] = [];
@@ -207,12 +206,6 @@ export class SkyScene extends Phaser.Scene {
   /** The latest sessions, the projects in the order they first appeared, and my names for them. Safe to call before the scene starts. */
   sync(sessions: BoardSession[], systems: string[], labels: Record<string, string> = {}, growth: Record<string, SectionGrowth> = {}): void {
     this.#pending = { sessions, systems, labels, growth };
-    if (this.#ready) this.#apply();
-  }
-
-  /** Takes a removed project off the island; the other sections close up behind it. */
-  forget(name: string): void {
-    this.#forget.add(name);
     if (this.#ready) this.#apply();
   }
 
@@ -481,12 +474,12 @@ export class SkyScene extends Phaser.Scene {
     const data = this.#pending;
     if (!data) return;
     const listed = new Set([...data.systems, ...data.sessions.map((s) => s.system)]);
-    const dropped = [...this.#forget].filter((name) => !listed.has(name));
+    // A project the hub no longer lists leaves: I removed it, it went quiet, or it joined a group
+    // (decision 47). The sections after it close up, so the island is laid out again.
+    const dropped = this.#order.filter((name) => !listed.has(name));
     if (dropped.length) {
-      // Removing a section moves the ones after it, so the island is laid out again.
       this.#clear();
-      this.#order = this.#order.filter((name) => !dropped.includes(name));
-      for (const name of dropped) this.#forget.delete(name);
+      this.#order = this.#order.filter((name) => listed.has(name));
       if (!this.#order.length) this.#buildGround(false); // nothing left: clear the ground too
     }
     const before = this.#sections.length;

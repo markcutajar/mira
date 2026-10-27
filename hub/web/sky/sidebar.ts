@@ -15,8 +15,6 @@ export interface SidebarOptions {
   onSession(id: string): void;
   /** A project's name was clicked. */
   onProject(name: string): void;
-  /** A project or session was removed from view. */
-  onRemoved(kind: 'system' | 'session', key: string): void;
 }
 
 export interface Sidebar {
@@ -240,7 +238,6 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
       void removeThing('system', remove, projectLabel(remove, live.systems)).then((done) => {
         if (!done) return;
         menus.delete(remove);
-        options.onRemoved('system', remove);
       });
     }
   });

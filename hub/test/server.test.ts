@@ -280,9 +280,10 @@ describe('hub server', () => {
   it('starts a new session in the repo I pick, in a group of repos', async () => {
     const group = new Roster();
     const placeFor = (cwd: string | undefined) => ({ system: 'Site', repo: cwd?.split('\\').pop(), root: cwd });
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString(); // recent, so neither has gone quiet
     group.seed('claude-code', [
-      { sessionId: 'g-1', system: 'Site', cwd: 'C:\\code\\site-app', lastAt: '2026-10-27T10:00:00.000Z', status: 'my-turn', transcript: 'C:\\t\\g-1.jsonl' },
-      { sessionId: 'g-2', system: 'Site', cwd: 'C:\\code\\site-docs', lastAt: '2026-10-27T11:00:00.000Z', status: 'working', transcript: 'C:\\t\\g-2.jsonl' },
+      { sessionId: 'g-1', system: 'Site', cwd: 'C:\\code\\site-app', lastAt: ago(2), status: 'my-turn', transcript: 'C:\\t\\g-1.jsonl' },
+      { sessionId: 'g-2', system: 'Site', cwd: 'C:\\code\\site-docs', lastAt: ago(1), status: 'working', transcript: 'C:\\t\\g-2.jsonl' },
     ]);
     const site = createHub({ ...options, store: new Store(':memory:'), roster: group, placeFor });
     const at = await listen(site);
