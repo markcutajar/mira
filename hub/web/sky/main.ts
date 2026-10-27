@@ -2,8 +2,9 @@
 // session's story on the right. A session row or a mirling opens its story; a project's name on
 // either side finds it on the other.
 
-import { clock, esc, projectLabel, toast } from '../shared/format.ts';
+import { clock, esc, projectLabel, sessionLabel, toast } from '../shared/format.ts';
 import { connectLive } from '../shared/live.ts';
+import { createNotifier } from '../shared/notify.ts';
 import { createPanel, linkedSession } from '../shared/panel.ts';
 import { drawnArt } from './drawn-art.ts';
 import { createPalette } from './palette.ts';
@@ -83,8 +84,8 @@ const live = connectLive({
   onConnection: renderConnection,
   // Projects arrive first, in the order they first appeared, so the island keeps its shape between visits.
   onSystems: () => { syncScene(); sidebar.render(); panel.refresh(); },
-  onSessions: () => { syncScene(); renderCounts(); sidebar.render(); panel.refresh(); },
-  onPending: () => { renderCounts(); sidebar.render(); panel.refresh(); },
+  onSessions: () => { syncScene(); renderCounts(); sidebar.render(); panel.refresh(); notifier.check(); },
+  onPending: () => { renderCounts(); sidebar.render(); panel.refresh(); notifier.check(); },
   onLayouts: () => scene.setLayouts(live.layouts),
   onEvent: (event) => { scene.event(event); panel.event(event); },
   onEvents: renderEvents,
@@ -99,6 +100,19 @@ const sidebar = createSidebar(side, {
   },
   onProject: (name) => scene.focusSection(name),
   onRemoved: (kind, key) => { if (kind === 'system') scene.forget(key); },
+});
+
+// A session that needs me, fails or finishes a long turn while I'm elsewhere says so (decision 45).
+const notifier = createNotifier({
+  toggle: $<HTMLInputElement>('notify'),
+  sessions: () => live.sessions,
+  pending: () => live.pending,
+  label: sessionLabel,
+  project: (system) => projectLabel(system, live.systems),
+  onOpen: (id) => {
+    panel.open(id);
+    scene.focusSession(id);
+  },
 });
 
 function syncScene() {

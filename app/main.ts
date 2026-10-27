@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, Menu, screen, session, shell, type Rectangle } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, screen, session, shell, type Rectangle } from 'electron';
 import { loadConfig } from '../hub/src/config.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -15,7 +15,7 @@ const CONTROL = join(REPO, 'hub', 'src', 'control.ts');
 const ICON = join(HERE, 'icon.ico');
 const APP_ID = 'Mira';
 const VOID = '#0b0d1a';
-const ALLOWED = new Set(['clipboard-read', 'clipboard-sanitized-write', 'fullscreen']);
+const ALLOWED = new Set(['clipboard-read', 'clipboard-sanitized-write', 'fullscreen', 'notifications']);
 
 let port = 4711;
 try {
@@ -104,7 +104,7 @@ function createWindow(): BrowserWindow {
     title: 'Mira',
     icon: ICON,
     backgroundColor: VOID,
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false, preload: join(HERE, 'preload.cjs') },
   });
   if (maximized) win.maximize();
   win.once('ready-to-show', () => win.show());
@@ -136,6 +136,18 @@ function createWindow(): BrowserWindow {
   });
   win.on('focus', () => win.flashFrame(false));
 
+  // A notification clicked on the page brings the window forward (decision 45). Windows lets a
+  // window that's on top take the focus, so it's put on top for the moment it takes it.
+  ipcMain.removeAllListeners('mira:focus');
+  ipcMain.on('mira:focus', (event) => {
+    if (event.sender !== win.webContents) return;
+    if (win.isMinimized()) win.restore();
+    win.setAlwaysOnTop(true);
+    win.show();
+    win.focus();
+    win.setAlwaysOnTop(false);
+  });
+
   // A few keys of a browser's, with no menu bar: F5 reloads, F11 is full screen, F12 the developer
   // tools, and Ctrl with plus, minus or 0 zooms. Every other key goes to the page and its terminal.
   win.webContents.on('before-input-event', (event, input) => {
@@ -158,6 +170,24 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
+/**
+ * Windows shows an app's notifications under the name and icon of the Start menu shortcut that
+ * carries its ID, and drops them without one (decision 45). So the app keeps one: Mira in the Start
+ * menu, opening it as the pinned button does, rewritten only when the app has moved.
+ */
+function startMenuShortcut(): void {
+  if (process.platform !== 'win32') return;
+  const link = join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Mira.lnk');
+  const want = { target: process.execPath, args: `"${HERE}"`, cwd: REPO, icon: ICON, iconIndex: 0, appUserModelId: APP_ID, description: 'Mira, the dashboard for my agents' };
+  try {
+    const have = shell.readShortcutLink(link);
+    if (have.target === want.target && have.args === want.args && have.icon === want.icon && have.appUserModelId === APP_ID) return;
+  } catch {
+    // None yet.
+  }
+  if (!shell.writeShortcutLink(link, 'create', want)) console.warn(`Mira couldn't write its Start menu shortcut at ${link}, so Windows may not show its notifications.`);
+}
+
 app.setAppUserModelId(APP_ID);
 if (!app.requestSingleInstanceLock()) {
   app.quit(); // Mira is open already: the first one comes forward instead
@@ -172,6 +202,7 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
     session.defaultSession.setPermissionRequestHandler((_contents, permission, done) => done(ALLOWED.has(permission)));
+    startMenuShortcut();
     win = createWindow();
   });
 }

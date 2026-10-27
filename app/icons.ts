@@ -1,6 +1,6 @@
-// Draws Mira's icons from a mirling's own pixel map (hub/web/sky/mirling.ts): the page's favicon,
-// and the app's icon for its window and the taskbar (decision 43). Run `npm run icons` after
-// changing the map; the files it writes are kept in the repo.
+// Draws Mira's icons from a mirling's own pixel map (hub/web/sky/mirling.ts): the page's favicon and
+// the picture on its notifications (decision 45), and the app's icon for its window and the taskbar
+// (decision 43). Run `npm run icons` after changing the map; the files it writes are kept in the repo.
 
 import { writeFileSync } from 'node:fs';
 import { crc32, deflateSync } from 'node:zlib';
@@ -83,5 +83,6 @@ function ico(sizes: number[]): Buffer {
 
 writeFileSync(new URL('../hub/web/favicon.svg', import.meta.url), svg());
 writeFileSync(new URL('icon.ico', import.meta.url), ico([16, 20, 24, 32, 40, 48, 64, 128, 256]));
+writeFileSync(new URL('../hub/web/mirling.png', import.meta.url), png(90)); // five pixels to each of the map's
 writeFileSync(new URL('icon.png', import.meta.url), png(256));
-console.log('Wrote hub/web/favicon.svg, app/icon.ico and app/icon.png.');
+console.log('Wrote hub/web/favicon.svg, hub/web/mirling.png, app/icon.ico and app/icon.png.');

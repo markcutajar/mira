@@ -273,6 +273,9 @@ describe('hub server', () => {
     const icon = await fetch(`${base}/favicon.svg`);
     assert.deepEqual([icon.status, icon.headers.get('content-type')], [200, 'image/svg+xml']);
     assert.match(await icon.text(), /^<svg [^>]*viewBox="0 0 18 18"/); // a mirling
+    const picture = await fetch(`${base}/mirling.png`); // on notifications
+    assert.deepEqual([picture.status, picture.headers.get('content-type')], [200, 'image/png']);
+    assert.match(page, /id="notify"/);
     assert.equal((await fetch(`${base}/toString`)).status, 404);
   });
 
