@@ -11,6 +11,8 @@ const Config = z.object({
   port: z.number().int().min(1).max(65535).default(4711),
   /** Rename or group sections: repo folder name to section name. */
   systems: z.record(z.string(), z.string().min(1).max(80)).default({}),
+  /** Which names mirlings get (decision 48). */
+  mirlingNames: z.enum(['cute', 'stars']).default('cute'),
   /** Keep logging payload shapes to ~/.mira/recordings, as the step 0 recorder did. */
   recordShapes: z.boolean().default(true),
   /** How long a permission prompt waits for Mira while Mira is open. Keep it under the hook's timeout. */

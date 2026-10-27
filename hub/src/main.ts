@@ -60,6 +60,7 @@ const hub = createHub({
   roster,
   sources,
   placeFor,
+  mirlingNames: config.mirlingNames,
   permissionWaitMs: config.permissionWaitSeconds * 1000,
   recordShape: config.recordShapes ? shapeRecorder(join(miraHome, 'recordings')) : undefined,
   onEvent: (event) => {

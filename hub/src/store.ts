@@ -28,6 +28,9 @@ export class Store {
   #clearLayout: StatementSync;
   #spent: StatementSync;
   #stored: StatementSync;
+  #seats: StatementSync;
+  #setSeat: StatementSync;
+  #pruneSeats: StatementSync;
   #systemOf: (stored: string) => string;
 
   // Events keep the section they were stored under. `systemOf` maps that to the section it belongs
@@ -56,6 +59,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS removed (kind TEXT NOT NULL, key TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (kind, key));
       -- How I arranged each project's section of the island in build mode (decision 39).
       CREATE TABLE IF NOT EXISTS layouts (system TEXT PRIMARY KEY, layout TEXT NOT NULL);
+      -- Each session's seat, which names its mirling, and when it got it (decision 48).
+      CREATE TABLE IF NOT EXISTS seats (session TEXT PRIMARY KEY, seat INTEGER NOT NULL, at TEXT NOT NULL);
     `);
     this.#insert = this.#db.prepare('INSERT OR IGNORE INTO events (id, at, source, system, actor_id, type, status, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     this.#recent = this.#db.prepare('SELECT body FROM events ORDER BY seq DESC LIMIT ?');
@@ -79,6 +84,9 @@ export class Store {
       SUM(COALESCE(json_extract(body, '$.usage.costUsd'), 0)) AS cost
       FROM events WHERE type = 'usage.reported' AND system IN (SELECT value FROM json_each(?)) GROUP BY session`);
     this.#prune = this.#db.prepare("DELETE FROM events WHERE at < ? AND type != 'usage.reported'");
+    this.#seats = this.#db.prepare('SELECT session, seat FROM seats');
+    this.#setSeat = this.#db.prepare('INSERT INTO seats (session, seat, at) VALUES (?, ?, ?) ON CONFLICT (session) DO UPDATE SET seat = excluded.seat, at = excluded.at');
+    this.#pruneSeats = this.#db.prepare('DELETE FROM seats WHERE at < ?');
     this.#folders = this.#db.prepare("SELECT json_extract(body, '$.detail.cwd') AS cwd FROM events WHERE system IN (SELECT value FROM json_each(?)) AND type != 'session.moved' AND cwd IS NOT NULL GROUP BY cwd ORDER BY MAX(at) DESC LIMIT ?");
   }
 
@@ -162,6 +170,15 @@ export class Store {
     else this.#clearLayout.run(system);
   }
 
+  /** Each session's seat, which names its mirling, by session. */
+  seats(): Record<string, number> {
+    return Object.fromEntries(this.#seats.all().map((row) => [String(row.session), Number(row.seat)]));
+  }
+
+  setSeat(session: string, seat: number, at: string): void {
+    this.#setSeat.run(session, seat, at);
+  }
+
   /** When each project or session was removed from view, by key. */
   removed(kind: Kind): Record<string, string> {
     return Object.fromEntries(this.#removed.all(kind).map((row) => [String(row.key), String(row.at)]));
@@ -172,8 +189,9 @@ export class Store {
     this.#remove.run(kind, key, at);
   }
 
-  /** Deletes events from before `at`, keeping per-turn token counts, which are the cost history (decision 32). */
+  /** Deletes events and seats from before `at`, keeping per-turn token counts, which are the cost history (decision 32). */
   prune(at: string): number {
+    this.#pruneSeats.run(at);
     return Number(this.#prune.run(at).changes);
   }
 

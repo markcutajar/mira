@@ -76,6 +76,9 @@ interface Helper {
 interface Mirling {
   id: string;
   title: string;
+  /** Its own name (decision 48), on the tag over its head. */
+  name: string;
+  tag: Text;
   sec: Section;
   home: Building;
   work: Building;
@@ -378,6 +381,13 @@ export class SkyScene extends Phaser.Scene {
       const key = names.waterfall(f.edge, reduceMotion ? 0 : fall);
       if (f.img.texture.key !== key) f.img.setTexture(key);
     }
+    // A mirling under the pointer names itself first, then a building, then the mirling whose story is open.
+    const selected = this.#selected ? this.#mirlings.get(this.#selected) : undefined;
+    const pointed = this.#mirlings.get(this.#hovered ?? '');
+    const building = pointed ? null : this.#hoveredBuilding;
+    const labelled = pointed ?? (building ? undefined : selected);
+    // Over a mirling's head: its name tag, or the label with its name and task while that shows; higher for a beacon.
+    const overHead = (col: Mirling) => Math.round(col.pos.y) - creature - (col.marks.beacon ? 22 * d / zoom + 4 * A : 4 * A);
     for (const col of this.#mirlings.values()) {
       const beat = Math.floor(time / 170 + col.phase * 2) % 2;
       const key = names.creature(col.palette, col.moving && beat ? 'b' : 'a');
@@ -393,6 +403,7 @@ export class SkyScene extends Phaser.Scene {
         y += bob + 5;
       }
       col.sprite.setFlipX(col.facing < 0).setPosition(x, y).setDepth(col.depth ?? col.pos.y);
+      col.tag.setVisible(Boolean(col.name) && col !== labelled).setScale(ui).setPosition(x, overHead(col));
       const head = y - creature;
       this.#placeGear(col, x, y, head, time, thoughtScale);
       const b = col.marks.beacon;
@@ -413,15 +424,10 @@ export class SkyScene extends Phaser.Scene {
         h.sprite.setPosition(Math.round(h.pos.x), Math.round(h.pos.y)).setDepth(h.pos.y);
       }
     }
-    const selected = this.#selected ? this.#mirlings.get(this.#selected) : undefined;
     if (selected) this.#selectMark.setPosition(Math.round(selected.pos.x), Math.round(selected.pos.y)).setDepth(selected.pos.y - 0.5);
-    // A mirling under the pointer names itself first, then a building, then the mirling whose story is open.
-    const pointed = this.#mirlings.get(this.#hovered ?? '');
-    const building = pointed ? null : this.#hoveredBuilding;
-    const labelled = pointed ?? (building ? undefined : selected);
     this.#hoverLabel.setVisible(Boolean(labelled || building));
     if (labelled) {
-      this.#hoverLabel.setText(labelled.title).setScale(ui).setPosition(Math.round(labelled.pos.x), Math.round(labelled.pos.y) - creature - (labelled.marks.beacon ? 22 * d / zoom + 4 * A : 4 * A));
+      this.#hoverLabel.setText(labelled.name ? `${labelled.name} · ${labelled.title}` : labelled.title).setScale(ui).setPosition(Math.round(labelled.pos.x), overHead(labelled));
     } else if (building) {
       this.#hoverLabel.setText(this.#buildingSays(building)).setScale(ui).setPosition(building.x, building.top - 2 * A);
     }
@@ -536,6 +542,10 @@ export class SkyScene extends Phaser.Scene {
         this.#setStatus(col, (s.status ?? null) as Status | null);
       }
       col.title = sessionLabel(s);
+      if (col.name !== (s.name ?? '')) {
+        col.name = s.name ?? '';
+        col.tag.setText(col.name);
+      }
       this.#syncHelpers(col, s);
     }
     for (const col of [...this.#mirlings.values()]) if (!seen.has(col.id)) this.#retire(col, false);
@@ -731,8 +741,11 @@ export class SkyScene extends Phaser.Scene {
     sprite.setData('session', s.id);
     sprite.on('pointerover', () => { this.#hovered = s.id; });
     sprite.on('pointerout', () => { if (this.#hovered === s.id) this.#hovered = null; });
+    // Its name over its head, drawn above the island but below the section names and the pointed-at label.
+    const tag = this.#label(s.name ?? '', { fontFamily: '"IBM Plex Sans", sans-serif', fontSize: '10px', color: '#ece8d9', backgroundColor: '#0b0d1aaa', padding: { x: 4, y: 1 } })
+      .setDepth(599999).setVisible(Boolean(s.name));
     const col: Mirling = {
-      id: s.id, title: sessionLabel(s), sec, home, work, cell, pos, sprite, status: null, base: palette, palette,
+      id: s.id, title: sessionLabel(s), name: s.name ?? '', tag, sec, home, work, cell, pos, sprite, status: null, base: palette, palette,
       walkId: 0, moving: false, facing: 1, phase: Math.random(), marks: {}, helpers: new Map(), removed: false,
       tool: null, act: null, gear: {}, play: null, aloft: false, later: [],
     };
@@ -741,7 +754,8 @@ export class SkyScene extends Phaser.Scene {
     this.#mirlings.set(s.id, col);
     if (!reduceMotion) {
       sprite.setAlpha(0);
-      this.tweens.add({ targets: sprite, alpha: 1, duration: 500 });
+      tag.setAlpha(0);
+      this.tweens.add({ targets: [sprite, tag], alpha: 1, duration: 500 });
     }
     this.#setStatus(col, (s.status ?? null) as Status | null);
     return col;
@@ -1034,8 +1048,12 @@ export class SkyScene extends Phaser.Scene {
     for (const h of col.helpers.values()) h.sprite.destroy();
     col.helpers.clear();
     this.tweens.killTweensOf(col.pos);
-    if (now || reduceMotion) col.sprite.destroy();
-    else this.tweens.add({ targets: col.sprite, alpha: 0, duration: 500, onComplete: () => col.sprite.destroy() });
+    if (now || reduceMotion) {
+      col.sprite.destroy();
+      col.tag.destroy();
+    } else {
+      this.tweens.add({ targets: [col.sprite, col.tag], alpha: 0, duration: 500, onComplete: () => { col.sprite.destroy(); col.tag.destroy(); } });
+    }
     col.home.residents = Math.max(0, col.home.residents - 1);
     this.#fitBuilding(col.home);
     this.#mirlings.delete(col.id);

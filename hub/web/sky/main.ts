@@ -106,7 +106,7 @@ const notifier = createNotifier({
   toggle: $<HTMLInputElement>('notify'),
   sessions: () => live.sessions,
   pending: () => live.pending,
-  label: sessionLabel,
+  label: (s) => (s.name ? `${s.name} · ${sessionLabel(s)}` : sessionLabel(s)),
   project: (system) => projectLabel(system, live.systems),
   onOpen: (id) => {
     panel.open(id);

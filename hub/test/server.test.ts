@@ -288,8 +288,9 @@ describe('hub server', () => {
     const site = createHub({ ...options, store: new Store(':memory:'), roster: group, placeFor });
     const at = await listen(site);
     try {
-      const listed = ((await (await fetch(`${at}/api/sessions`)).json()) as { sessions: Array<{ id: string; repo?: string }> }).sessions;
+      const listed = ((await (await fetch(`${at}/api/sessions`)).json()) as { sessions: Array<{ id: string; repo?: string; name?: string }> }).sessions;
       assert.deepEqual(listed.map((s) => [s.id, s.repo]).sort(), [['g-1', 'site-app'], ['g-2', 'site-docs']]);
+      assert.equal(new Set(listed.map((s) => s.name).filter(Boolean)).size, 2); // each mirling has a name of its own (decision 48)
       const target = await (await fetch(`${at}/api/systems/Site/start`)).json();
       assert.equal(target.folder, 'C:\\code\\site-docs'); // the one used last
       assert.deepEqual(target.choices.map((c: { folder: string }) => c.folder), ['C:\\code\\site-docs', 'C:\\code\\site-app']);

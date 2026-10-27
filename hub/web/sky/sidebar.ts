@@ -175,7 +175,7 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
     const meta = [repoOf(s), s.lastTool ? esc(s.lastTool) : '', `<span data-since="${esc(s.lastAt)}"></span>`, s.usage ? esc(cost(s.usage.costUsd)) : ''].filter(Boolean).join(' · ');
     return `<li class="row-item"><button type="button" class="row${options.current() === s.id ? ' open' : ''}" data-session="${esc(s.id)}" data-status="${esc(status)}">
       <span class="dot" title="${esc(STATUS_LABEL[status] ?? 'Unknown')}"></span>
-      <span class="row-title">${esc(sessionLabel(s))}${badges}</span>
+      <span class="row-title">${s.name ? `<span class="row-name" title="Its mirling">${esc(s.name)}</span>` : ''}${esc(sessionLabel(s))}${badges}</span>
       <span class="row-meta"><span class="row-status">${esc(STATUS_LABEL[status] ?? 'Unknown')}</span> · ${meta}</span>
     </button><button type="button" class="ghost small row-rename" data-rename-session="${esc(s.id)}" title="Rename this session" aria-label="Rename ${esc(sessionLabel(s))}">✎</button></li>`;
   }

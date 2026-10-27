@@ -3,8 +3,8 @@
 import type { SessionView } from '../../src/roster.ts';
 import type { PendingPrompt } from '../../src/permissions.ts';
 
-/** A session as the hub sends it to the browser, with its title, worktree and repo in a group (decision 47) filled in, and whether Mira can message it (decision 46). */
-export type BoardSession = SessionView & { title?: string; worktree?: string; repo?: string; canMessage?: boolean };
+/** A session as the hub sends it to the browser, with its mirling's name (decision 48), its title, worktree and repo in a group (decision 47) filled in, and whether Mira can message it (decision 46). */
+export type BoardSession = SessionView & { name?: string; title?: string; worktree?: string; repo?: string; canMessage?: boolean };
 export type { PendingPrompt };
 
 export const STATUS_LABEL: Record<string, string> = { 'needs-me': 'Needs you', failed: 'Failed', 'my-turn': 'Your turn', working: 'Working', ended: 'Ended' };

@@ -293,7 +293,7 @@ export function createPanel(options: PanelOptions): Panel {
     const name = session ? sessionLabel(session) : short(state.id);
     title.textContent = state.helper ? state.helperName || 'Subagent' : name;
     $('sub').textContent = state.helper ? `Subagent of ${name}`
-      : session ? [...new Set([options.projectLabel?.(session.system) ?? session.system, folder(session.cwd)])].concat(STATUS_LABEL[session.status ?? ''] ?? []).filter(Boolean).join(' · ') : '';
+      : session ? [...new Set([session.name ?? '', options.projectLabel?.(session.system) ?? session.system, folder(session.cwd)])].concat(STATUS_LABEL[session.status ?? ''] ?? []).filter(Boolean).join(' · ') : '';
     $('back').hidden = !state.helper;
     const terminal = $('terminal');
     terminal.hidden = Boolean(state.helper) || !state.terminal.available;

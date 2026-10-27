@@ -10,6 +10,7 @@ import { WebSocketServer } from 'ws';
 import { CONTRACT_VERSION, MiraEvent } from '../../contracts/src/index.ts';
 import type { Editor, EditorTarget } from './editor.ts';
 import type { Growth } from './growth.ts';
+import { MirlingNames, type Pack } from './mirlings.ts';
 import { Permissions, summarise, type Decision } from './permissions.ts';
 import type { Roster, SessionView } from './roster.ts';
 import type { SourceAdapter } from './sources.ts';
@@ -26,6 +27,8 @@ export interface HubOptions {
   roster: Roster;
   sources: SourceAdapter[];
   placeFor: (cwd: string | undefined) => Place;
+  /** Which names mirlings get (decision 48); cute ones unless the config says otherwise. */
+  mirlingNames?: Pack;
   permissionWaitMs: number;
   recordShape?: (source: string, payload: Payload, bytes: number) => void;
   onEvent?: (event: MiraEvent) => void;
@@ -82,14 +85,21 @@ export function createHub(options: HubOptions) {
     return { worktree, ...(repo ? { repo } : {}) };
   };
 
-  const sessions = () => roster.snapshot()
-    .filter((s) => !gone('session', s.id, s.lastAt) && !gone('system', s.system, s.lastAt))
-    .map((s) => ({
-      ...s,
-      title: names.session[s.id] ?? sources.get(s.source)?.title?.(s),
-      ...labels(s.cwd),
-      ...(sources.get(s.source)?.canMessage?.(s) ? { canMessage: true } : {}),
-    }));
+  const mirlings = new MirlingNames(store, options.mirlingNames);
+
+  const sessions = () => {
+    const all = roster.snapshot();
+    const named = mirlings.names(all.map((s) => s.id));
+    return all
+      .filter((s) => !gone('session', s.id, s.lastAt) && !gone('system', s.system, s.lastAt))
+      .map((s) => ({
+        ...s,
+        name: named.get(s.id),
+        title: names.session[s.id] ?? sources.get(s.source)?.title?.(s),
+        ...labels(s.cwd),
+        ...(sources.get(s.source)?.canMessage?.(s) ? { canMessage: true } : {}),
+      }));
+  };
 
   // A session on the board, or an earlier one a source still keeps (decision 40), which then joins
   // the roster so its story, terminal and editor work like any other's.
