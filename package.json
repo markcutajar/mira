@@ -2,6 +2,7 @@
   "name": "mira",
   "private": true,
   "description": "One sky for all my agent work.",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=24"

@@ -2,6 +2,7 @@
   "name": "mira-app",
   "productName": "Mira",
   "description": "Mira in a window of its own, to pin to the taskbar.",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "main": "main.ts"

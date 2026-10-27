@@ -6,6 +6,8 @@
 
 Mira watches every Claude Code session on your machine and draws them as mirlings, small creatures at work on a pixel-art island floating in space. Each project is a section of the island. At a glance you see what's moving, what's stuck and what's waiting on you; click a mirling and its story opens, turn by turn, with tokens and estimated cost.
 
+![Mira's island: four projects with their sessions down the left, mirlings at work, one waiting for an answer and one that failed](docs/island.png)
+
 > **Status:** a personal project, built and used on Windows 11. It runs on Linux too, tested on Ubuntu 22.04, and should run on a Mac, though nobody has tried yet. Starting the hub at login is only set up for Windows so far.
 
 ## What it does
@@ -17,6 +19,10 @@ Mira watches every Claude Code session on your machine and draws them as mirling
 - **Build mode** to make the island yours: plants, decorations, paths, ponds, boats, swings, slides and trampolines.
 - **Project groups**, so related repos share one section.
 - **A desktop app**: a window of its own to pin to the taskbar.
+
+![A session's story open beside the island: each turn's prompt, replies and tool calls, a subagent still running, tokens and estimated cost, and a box to message the session](docs/story.png)
+
+The projects and sessions in these pictures are made up.
 
 ## How it works
 
@@ -43,3 +49,7 @@ Mira knows Claude Code. Every source plugs into the hub through one adapter, so 
 Thronglets (Black Mirror, "Plaything") for a little world that lives on its own, Pixel Agents for characters whose animation shows what they're really doing, Satisfactory for work that piles up, and Minions for many small, eager workers.
 
 These projects were read as reference while building Mira, and are all MIT-licensed: [Pixel Agents](https://github.com/pixel-agents-hq/pixel-agents), [Mission Control](https://github.com/builderz-labs/mission-control) and [Agent Mission Control](https://github.com/danwahlin/agent-mission-control).
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
