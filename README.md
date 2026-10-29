@@ -15,7 +15,7 @@ Mira watches every Claude Code session on your machine and draws them as mirling
 - **The island.** A section per project, joined by streams and bridges, and a mirling per session acting out what it's doing: reading at the library, hammering at the workshop, thinking between tools, and playing on the swings or floating in the pond while it's your turn. Workshops and libraries grow with each project's commits over the last 30 days.
 - **The story.** Every turn of a session, with its replies, tool calls and subagents, and tokens and estimated cost per turn, read from Claude Code's transcripts when you open it.
 - **Stepping in.** Answer permission prompts from Mira, send a running session a message, start a new session in VS Code with your prompt typed in, carry a session on in a terminal inside the page, or open it in VS Code.
-- **Notifications** when a session needs you, fails, or finishes a long turn.
+- **Notifications** when a session needs you, fails, or finishes a long turn, and in the app a pop-up in the middle of the screen and a red badge on its taskbar button. A session calling for you glows on the board until you read it, and you can tick any one off.
 - **Build mode** to make the island yours: plants, decorations, paths, ponds, boats, swings, slides and trampolines.
 - **Project groups**, so related repos share one section.
 - **A desktop app**: a window of its own to pin to the taskbar.

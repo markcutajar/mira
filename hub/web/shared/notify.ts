@@ -3,13 +3,34 @@
 // brings Mira forward on that session. A browser asks once for leave to show them; the app has it.
 // They name the session and the tool it asks for, never what it would run, so nothing of a session's
 // content lands in the system's notification history.
+// In the app, the same moments also put up Mira's own pop-up in the middle of the screen and flash
+// its taskbar button, and they all go away once I've read the session (decision 55).
 
-import type { BoardSession, PendingPrompt } from './format.ts';
+import { markRead, sessionLabel, type BoardSession, type PendingPrompt } from './format.ts';
+
+/** What Mira's own pop-up shows for one session: what happened, its name, and where. */
+export interface PopupCard {
+  id: string;
+  status: Worth;
+  title: string;
+  task?: string;
+  body: string;
+}
 
 declare global {
   interface Window {
-    /** What the desktop app (decision 43) adds to the page: a way to bring its window forward. */
-    miraApp?: { focus(): void };
+    /**
+     * What the desktop app (decisions 43 and 55) adds to the page: bringing its window forward, its
+     * pop-up and the flash of its taskbar button. All but `focus` are missing in an app started
+     * before they existed, until it's restarted.
+     */
+    miraApp?: {
+      focus(): void;
+      flash?(): void;
+      popup?(card: PopupCard): void;
+      unpop?(id: string): void;
+      onPopup?(handler: (action: 'open' | 'editor' | 'dismiss', id: string) => void): void;
+    };
   }
 }
 
@@ -21,6 +42,7 @@ const LONG_TURN_MS = 20_000;
 const ICON = '/mirling.png';
 
 type Worth = 'needs-me' | 'failed' | 'my-turn';
+const HAPPENED: Record<Worth, string> = { 'needs-me': 'needs you', failed: 'failed', 'my-turn': 'is done' };
 
 export interface NotifierOptions {
   /** The "Notify me" checkbox, remembered in this browser. */
@@ -44,7 +66,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
   let on = false;
   let primed = false;
   const last = new Map<string, { status: string | null; since: number }>();
-  const shown = new Map<string, { status: Worth; note: Notification }>();
+  const shown = new Map<string, { status: Worth; note?: Notification }>();
 
   const set = (value: boolean) => {
     on = value && supported && Notification.permission === 'granted';
@@ -73,26 +95,40 @@ export function createNotifier(options: NotifierOptions): Notifier {
 
   const inFront = () => document.visibilityState === 'visible' && document.hasFocus();
   const forget = (id: string) => {
-    shown.get(id)?.note.close();
+    if (!shown.has(id)) return;
+    shown.get(id)?.note?.close();
+    window.miraApp?.unpop?.(id);
     shown.delete(id);
   };
   // Back in front of me, what they said is on screen.
   window.addEventListener('focus', () => { for (const id of [...shown.keys()]) forget(id); });
 
+  // The pop-up's buttons: Open shows the session here, VS Code there, where the app has already opened
+  // it, and closing the card reads it.
+  window.miraApp?.onPopup?.((action, id) => {
+    forget(id);
+    if (action === 'open') {
+      window.focus();
+      options.onOpen(id);
+    } else void markRead(id);
+  });
+
   function words(s: BoardSession, status: Worth): { title: string; body: string } {
     const label = options.label(s);
     const project = options.project(s.system);
+    const title = `${label} ${HAPPENED[status]}`;
     if (status === 'needs-me') {
       const tool = options.pending().find((p) => p.sessionId === s.id)?.tool;
-      return { title: `${label} needs you`, body: tool ? `Asks to use ${tool}, in ${project}.` : `Waiting for you, in ${project}.` };
+      return { title, body: tool ? `Asks to use ${tool}, in ${project}.` : `Waiting for you, in ${project}.` };
     }
-    if (status === 'failed') return { title: `${label} failed`, body: `In ${project}.` };
-    return { title: `${label} is done`, body: `Your turn, in ${project}.` };
+    return { title, body: status === 'failed' ? `In ${project}.` : `Your turn, in ${project}.` };
   }
 
   function fire(id: string, status: Worth): void {
     const s = options.sessions().find((x) => x.id === id);
-    if (!on || !s || s.status !== status || inFront()) return;
+    if (!s || s.status !== status || !s.unread || inFront()) return;
+    window.miraApp?.flash?.();
+    if (!on) return;
     forget(id);
     const { title, body } = words(s, status);
     const note = new Notification(title, { body, tag: `mira-${id}`, icon: ICON });
@@ -102,7 +138,9 @@ export function createNotifier(options: NotifierOptions): Notifier {
       window.focus();
       options.onOpen(id);
     };
-    note.onclose = () => { if (shown.get(id)?.note === note) shown.delete(id); };
+    note.onclose = () => { if (shown.get(id)?.note === note) delete shown.get(id)?.note; };
+    // The pop-up has room for the session's name on a line of its own, so what happened stays in view.
+    window.miraApp?.popup?.({ id, status, title: `${s.name ?? sessionLabel(s)} ${HAPPENED[status]}`, ...(s.name ? { task: sessionLabel(s) } : {}), body });
     shown.set(id, { status, note });
   }
 
@@ -111,6 +149,8 @@ export function createNotifier(options: NotifierOptions): Notifier {
       const now = Date.now();
       const sessions = options.sessions();
       for (const s of sessions) {
+        // One read while it was showing goes away.
+        if (!s.unread) forget(s.id);
         const before = last.get(s.id);
         if (before?.status === s.status) continue;
         last.set(s.id, { status: s.status, since: now });

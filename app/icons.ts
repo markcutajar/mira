@@ -3,8 +3,8 @@
 // (decision 43). Run `npm run icons` after changing the map; the files it writes are kept in the repo.
 
 import { writeFileSync } from 'node:fs';
-import { crc32, deflateSync } from 'node:zlib';
 import { MIRLING, PALETTES } from '../hub/web/sky/mirling.ts';
+import { png as encode } from './png.ts';
 
 const map = MIRLING.a;
 const colours = PALETTES.y;
@@ -39,26 +39,7 @@ function pixels(size: number): Buffer {
   return out;
 }
 
-function png(size: number): Buffer {
-  const row = size * 4 + 1;
-  const raw = Buffer.alloc(row * size); // each row starts with filter type 0, none
-  const rgba = pixels(size);
-  for (let y = 0; y < size; y++) rgba.copy(raw, y * row + 1, y * size * 4, (y + 1) * size * 4);
-  const chunk = (type: string, data: Buffer) => {
-    const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
-    const length = Buffer.alloc(4);
-    length.writeUInt32BE(data.length);
-    const crc = Buffer.alloc(4);
-    crc.writeUInt32BE(crc32(body));
-    return Buffer.concat([length, body, crc]);
-  };
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(size, 0);
-  header.writeUInt32BE(size, 4);
-  header[8] = 8; // bits per channel
-  header[9] = 6; // red, green, blue and alpha
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
-}
+const png = (size: number) => encode(size, size, pixels(size));
 
 /** A Windows icon holding a PNG at each size the title bar, taskbar and Start menu ask for. */
 function ico(sizes: number[]): Buffer {

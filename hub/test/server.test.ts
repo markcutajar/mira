@@ -379,6 +379,31 @@ describe('hub server', () => {
     assert.deepEqual(await layouts(), {});
   });
 
+  it('keeps a session calling for me unread until I read it, and again when it calls again', async () => {
+    const of = async () => (await sessions()).sessions.find((s) => s.id === 's-9') as { unread?: boolean } | undefined;
+    const hook = (hook_event_name: string, extra = {}) => post('/ingest/claude-code', { hook_event_name, session_id: 's-9', cwd: 'C:\\code\\mira', ...extra });
+    const later = () => new Promise((done) => setTimeout(done, 5));
+    await hook('SessionStart');
+    await hook('UserPromptSubmit');
+    assert.equal((await of())?.unread, undefined);
+    await later();
+    await hook('Stop');
+    assert.equal((await of())?.unread, true);
+    assert.equal((await post('/api/sessions/s-9/read', {})).status, 204);
+    assert.equal((await of())?.unread, undefined);
+    // Kept by the store, so a restart remembers it.
+    assert.ok(store.reads()['s-9']);
+
+    await later();
+    await hook('UserPromptSubmit');
+    await later();
+    await hook('Notification', { notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' });
+    assert.equal((await of())?.unread, true);
+    assert.equal((await post('/api/sessions/s-9/read', {})).status, 204);
+    assert.equal((await of())?.unread, undefined);
+    assert.equal((await post('/api/sessions/nobody/read', {})).status, 404);
+  });
+
   it('removes a session until something happens in it again', async () => {
     assert.equal((await post('/api/remove/session/s-5', {})).status, 204);
     assert.equal((await sessions()).sessions.some((s) => s.id === 's-5'), false);

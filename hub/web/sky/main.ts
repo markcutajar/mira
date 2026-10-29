@@ -2,7 +2,7 @@
 // session's story on the right. A session row or a mirling opens its story; a project's name on
 // either side finds it on the other.
 
-import { clock, esc, projectLabel, sessionLabel, toast } from '../shared/format.ts';
+import { clock, esc, markRead, projectLabel, sessionLabel, toast } from '../shared/format.ts';
 import { connectLive } from '../shared/live.ts';
 import { createNotifier } from '../shared/notify.ts';
 import { createPanel, linkedSession } from '../shared/panel.ts';
@@ -71,6 +71,7 @@ const panel = createPanel({
   projectLabel: (system) => projectLabel(system, live.systems),
   onChange: (id) => {
     if (id) setBuild(false); // a story takes the place of the palette
+    read(id, true);
     scene.select(id);
     if (id) scene.reveal(id);
     else scene.showIsland(); // closing a story goes back to the whole island
@@ -84,7 +85,7 @@ const live = connectLive({
   onConnection: renderConnection,
   // Projects arrive first, in the order they first appeared, so the island keeps its shape between visits.
   onSystems: () => { syncScene(); sidebar.render(); panel.refresh(); },
-  onSessions: () => { syncScene(); renderCounts(); sidebar.render(); panel.refresh(); notifier.check(); },
+  onSessions: () => { syncScene(); renderCounts(); sidebar.render(); panel.refresh(); notifier.check(); read(panel.current()); },
   onPending: () => { renderCounts(); sidebar.render(); panel.refresh(); notifier.check(); },
   onLayouts: () => scene.setLayouts(live.layouts),
   onEvent: (event) => { scene.event(event); panel.event(event); },
@@ -99,7 +100,20 @@ const sidebar = createSidebar(side, {
     scene.focusSession(id);
   },
   onProject: (name) => scene.focusSection(name),
+  onDone: (id) => { if (panel.current() === id) panel.close(); },
 });
+
+// A session calls for me until I read it (decision 55): opening its story, or having it open in front
+// of me when it calls, reads it, as does its row's read button.
+const reading = new Set<string>();
+function read(id: string | null, opened = false) {
+  const s = id ? live.sessions.find((x) => x.id === id) : undefined;
+  if (!s?.unread || reading.has(s.id)) return;
+  if (!opened && !(document.visibilityState === 'visible' && document.hasFocus())) return;
+  reading.add(s.id);
+  void markRead(s.id).finally(() => reading.delete(s.id));
+}
+window.addEventListener('focus', () => read(panel.current()));
 
 // A session that needs me, fails or finishes a long turn while I'm elsewhere says so (decision 45).
 const notifier = createNotifier({
@@ -135,7 +149,10 @@ function renderCounts() {
   const chip = $<HTMLButtonElement>('chip-needs');
   chip.classList.toggle('on', needs > 0);
   chip.disabled = needs === 0;
-  document.title = needs ? `(${needs}) Mira` : 'Mira';
+  // The title counts the sessions calling for me that I haven't read, which the app shows as a badge
+  // on its taskbar button (decision 55).
+  const unread = live.sessions.filter((s) => s.unread).length;
+  document.title = unread ? `(${unread}) Mira` : 'Mira';
 }
 
 function renderEvents() {

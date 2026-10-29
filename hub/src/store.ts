@@ -31,6 +31,9 @@ export class Store {
   #seats: StatementSync;
   #setSeat: StatementSync;
   #pruneSeats: StatementSync;
+  #reads: StatementSync;
+  #setRead: StatementSync;
+  #pruneReads: StatementSync;
   #systemOf: (stored: string) => string;
 
   // Events keep the section they were stored under. `systemOf` maps that to the section it belongs
@@ -61,6 +64,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS layouts (system TEXT PRIMARY KEY, layout TEXT NOT NULL);
       -- Each session's seat, which names its mirling, and when it got it (decision 48).
       CREATE TABLE IF NOT EXISTS seats (session TEXT PRIMARY KEY, seat INTEGER NOT NULL, at TEXT NOT NULL);
+      -- When I last read each session: what it called me for until then is read (decision 55).
+      CREATE TABLE IF NOT EXISTS reads (session TEXT PRIMARY KEY, at TEXT NOT NULL);
     `);
     this.#insert = this.#db.prepare('INSERT OR IGNORE INTO events (id, at, source, system, actor_id, type, status, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     this.#recent = this.#db.prepare('SELECT body FROM events ORDER BY seq DESC LIMIT ?');
@@ -87,6 +92,9 @@ export class Store {
     this.#seats = this.#db.prepare('SELECT session, seat FROM seats');
     this.#setSeat = this.#db.prepare('INSERT INTO seats (session, seat, at) VALUES (?, ?, ?) ON CONFLICT (session) DO UPDATE SET seat = excluded.seat, at = excluded.at');
     this.#pruneSeats = this.#db.prepare('DELETE FROM seats WHERE at < ?');
+    this.#reads = this.#db.prepare('SELECT session, at FROM reads');
+    this.#setRead = this.#db.prepare('INSERT INTO reads (session, at) VALUES (?, ?) ON CONFLICT (session) DO UPDATE SET at = excluded.at');
+    this.#pruneReads = this.#db.prepare('DELETE FROM reads WHERE at < ?');
     this.#folders = this.#db.prepare("SELECT json_extract(body, '$.detail.cwd') AS cwd FROM events WHERE system IN (SELECT value FROM json_each(?)) AND type != 'session.moved' AND cwd IS NOT NULL GROUP BY cwd ORDER BY MAX(at) DESC LIMIT ?");
   }
 
@@ -179,6 +187,15 @@ export class Store {
     this.#setSeat.run(session, seat, at);
   }
 
+  /** When I last read each session, by session. */
+  reads(): Record<string, string> {
+    return Object.fromEntries(this.#reads.all().map((row) => [String(row.session), String(row.at)]));
+  }
+
+  setRead(session: string, at: string): void {
+    this.#setRead.run(session, at);
+  }
+
   /** When each project or session was removed from view, by key. */
   removed(kind: Kind): Record<string, string> {
     return Object.fromEntries(this.#removed.all(kind).map((row) => [String(row.key), String(row.at)]));
@@ -189,9 +206,10 @@ export class Store {
     this.#remove.run(kind, key, at);
   }
 
-  /** Deletes events and seats from before `at`, keeping per-turn token counts, which are the cost history (decision 32). */
+  /** Deletes events, seats and reads from before `at`, keeping per-turn token counts, which are the cost history (decision 32). */
   prune(at: string): number {
     this.#pruneSeats.run(at);
+    this.#pruneReads.run(at);
     return Number(this.#prune.run(at).changes);
   }
 

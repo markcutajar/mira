@@ -3,8 +3,8 @@
 import type { SessionView } from '../../src/roster.ts';
 import type { PendingPrompt } from '../../src/permissions.ts';
 
-/** A session as the hub sends it to the browser, with its mirling's name (decision 48), its title, worktree and repo in a group (decision 47) filled in, and whether Mira can message it (decision 46). */
-export type BoardSession = SessionView & { name?: string; title?: string; worktree?: string; repo?: string; canMessage?: boolean };
+/** A session as the hub sends it to the browser, with its mirling's name (decision 48), its title, worktree and repo in a group (decision 47) filled in, whether Mira can message it (decision 46), and whether it's calling for me with something I haven't read (decision 55). */
+export type BoardSession = SessionView & { name?: string; title?: string; worktree?: string; repo?: string; canMessage?: boolean; unread?: boolean };
 export type { PendingPrompt };
 
 export const STATUS_LABEL: Record<string, string> = { 'needs-me': 'Needs you', failed: 'Failed', 'my-turn': 'Your turn', working: 'Working', ended: 'Ended' };
@@ -59,6 +59,16 @@ export function toast(text: string): void {
   el.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => { if (el) el.hidden = true; }, 6000);
+}
+
+/** Tells the hub I've read what a session called me for (decision 55); `said` toasts if it couldn't. */
+export async function markRead(id: string, said = false): Promise<void> {
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/read`, { method: 'POST' });
+    if (!res.ok && said) toast((await res.text()) || `The hub couldn't mark it read (${res.status}).`);
+  } catch {
+    if (said) toast("The hub isn't reachable.");
+  }
 }
 
 /** Answers a waiting permission prompt from Mira; `terminal` hands it back to the terminal at once. */

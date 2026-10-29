@@ -6,8 +6,10 @@ import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, ipcMain, Menu, screen, session, shell, type Rectangle } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, session, shell, type IpcMainEvent, type Rectangle } from 'electron';
 import { loadConfig } from '../hub/src/config.ts';
+import { badgePng } from './badge.ts';
+import { asCard, createPopup } from './popup.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = dirname(HERE);
@@ -130,23 +132,64 @@ function createWindow(): BrowserWindow {
     outside(url);
   });
 
-  // When a prompt starts waiting for me, the page's title gains a count: the taskbar button flashes.
+  // The page's title counts the sessions calling for me, which the taskbar button wears as a red
+  // badge (decision 55): over its corner on Windows, on the Dock icon on a Mac.
   win.on('page-title-updated', (_event, title) => {
-    if (/^\(\d+\)/.test(title) && !win.isFocused()) win.flashFrame(true);
+    const count = Number(title.match(/^\((\d+)\)/)?.[1] ?? 0);
+    if (process.platform === 'win32') win.setOverlayIcon(count ? nativeImage.createFromBuffer(badgePng(count), { scaleFactor: 2 }) : null, count ? `${count} waiting for you` : '');
+    else app.setBadgeCount(count);
   });
   win.on('focus', () => win.flashFrame(false));
 
   // A notification clicked on the page brings the window forward (decision 45). Windows lets a
   // window that's on top take the focus, so it's put on top for the moment it takes it.
-  ipcMain.removeAllListeners('mira:focus');
-  ipcMain.on('mira:focus', (event) => {
-    if (event.sender !== win.webContents) return;
+  const forward = () => {
     if (win.isMinimized()) win.restore();
     win.setAlwaysOnTop(true);
     win.show();
     win.focus();
     win.setAlwaysOnTop(false);
+  };
+  const fromPage = (event: IpcMainEvent) => event.sender === win.webContents;
+  for (const channel of ['mira:focus', 'mira:flash', 'mira:popup', 'mira:unpop']) ipcMain.removeAllListeners(channel);
+  ipcMain.on('mira:focus', (event) => { if (fromPage(event)) forward(); });
+  // When a session calls for me while I'm elsewhere, the page flashes the taskbar button and puts up
+  // Mira's pop-up in the middle of the screen (decision 55); a click on the pop-up goes back to the page.
+  const tell = (action: string, id: string) => { if (!win.isDestroyed()) win.webContents.send('mira:popup-action', action, id); };
+  const popup = createPopup(HERE, win, (action, id) => {
+    if (action === 'editor') return void inEditor(id);
+    if (action === 'open') forward();
+    tell(action, id);
   });
+  // Open in VS Code does what the story's Continue in VS Code does: the link to its window brings
+  // that window forward, then the hub opens the conversation in it. One with no VS Code window to go
+  // to opens in Mira instead.
+  async function inEditor(id: string) {
+    const at = `${HUB}/api/sessions/${encodeURIComponent(id)}/editor`;
+    try {
+      const res = await fetch(at, { signal: AbortSignal.timeout(3000) });
+      const link = res.ok ? ((await res.json()) as { link?: unknown }).link : undefined;
+      if (typeof link === 'string' && /^vscode:/i.test(link)) {
+        await shell.openExternal(link);
+        await fetch(at, { method: 'POST', signal: AbortSignal.timeout(3000) });
+        return tell('editor', id);
+      }
+    } catch {
+      // The hub isn't answering: the page says so.
+    }
+    if (win.isDestroyed()) return;
+    forward();
+    tell('open', id);
+  }
+  ipcMain.on('mira:flash', (event) => { if (fromPage(event) && !win.isFocused()) win.flashFrame(true); });
+  ipcMain.on('mira:popup', (event, card: unknown) => {
+    const valid = fromPage(event) ? asCard(card) : null;
+    if (valid) popup.show(valid);
+  });
+  ipcMain.on('mira:unpop', (event, id: unknown) => { if (fromPage(event) && typeof id === 'string') popup.hide(id); });
+  // A page loaded afresh starts with nothing showing; so does the app closing.
+  win.webContents.on('did-navigate', () => popup.clear());
+  win.on('closed', () => popup.close());
 
   // A few keys of a browser's, with no menu bar: F5 reloads, F11 is full screen, F12 the developer
   // tools, and Ctrl with plus, minus or 0 zooms. Every other key goes to the page and its terminal.

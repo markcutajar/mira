@@ -87,6 +87,11 @@ export function createHub(options: HubOptions) {
 
   const mirlings = new MirlingNames(store, options.mirlingNames);
 
+  // When I last read each session (decision 55), written through like names.
+  const reads = store.reads();
+  // It called for me since I last read it, and what it called for still stands.
+  const unread = (s: SessionView) => Boolean(s.calledAt && (s.status === 'needs-me' || s.status === 'my-turn' || s.status === 'failed') && s.calledAt > (reads[s.id] ?? ''));
+
   const sessions = () => {
     const all = roster.snapshot();
     const named = mirlings.names(all.map((s) => s.id));
@@ -98,6 +103,7 @@ export function createHub(options: HubOptions) {
         title: names.session[s.id] ?? sources.get(s.source)?.title?.(s),
         ...labels(s.cwd),
         ...(sources.get(s.source)?.canMessage?.(s) ? { canMessage: true } : {}),
+        ...(unread(s) ? { unread: true } : {}),
       }));
   };
 
@@ -254,6 +260,16 @@ export function createHub(options: HubOptions) {
     broadcast('sessions', sessions());
   }
 
+  // POST .../read says I've read what a session called me for, so it stops calling until it calls
+  // again (decision 55).
+  function read(res: ServerResponse, id: string) {
+    if (!roster.get(id)) return reply(res, 404, 'Mira has no session by that id.');
+    reads[id] = new Date().toISOString();
+    store.setRead(id, reads[id]);
+    res.writeHead(204).end();
+    broadcast('sessions', sessions());
+  }
+
   // A project's own folders: the roots of its live sessions, most recent first, then of the folders
   // its stored events name, as long as they still exist and the editor can find a window for them.
   // A project has one, unless it's a group of repos (decision 47).
@@ -348,6 +364,7 @@ export function createHub(options: HubOptions) {
     const terminalOf = req.method === 'GET' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/terminal$/)?.[1] : undefined;
     const editorOf = req.method === 'GET' || req.method === 'POST' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/editor$/)?.[1] : undefined;
     const messageTo = req.method === 'POST' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/message$/)?.[1] : undefined;
+    const readOf = req.method === 'POST' ? url.pathname.match(/^\/api\/sessions\/([\w-]+)\/read$/)?.[1] : undefined;
     const manage = req.method === 'PUT' || req.method === 'POST' ? url.pathname.match(/^\/api\/(names|remove)\/(system|session)\/([^/]{1,240})$/) : null;
     const startOf = req.method === 'GET' || req.method === 'POST' ? url.pathname.match(/^\/api\/systems\/([^/]{1,240})\/start$/)?.[1] : undefined;
     const historyOf = req.method === 'GET' ? url.pathname.match(/^\/api\/systems\/([^/]{1,240})\/history$/)?.[1] : undefined;
@@ -360,6 +377,7 @@ export function createHub(options: HubOptions) {
     if (terminalOf) return void terminal(res, terminalOf);
     if (editorOf) return editor(req, res, editorOf);
     if (messageTo) return void message(req, res, messageTo);
+    if (readOf) return read(res, readOf);
     if (startOf) return void startIn(req, res, decodeName(startOf));
     if (historyOf) return history(res, decodeName(historyOf), url);
     if (route === 'GET /api/stream') return stream(req, res, url);

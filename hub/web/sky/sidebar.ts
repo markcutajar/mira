@@ -2,9 +2,9 @@
 // project with its sessions and, folded away, its earlier conversations (decision 40). A session row
 // flies to its mirling and opens its story.
 
-import { ago, answerPrompt, cost, esc, projectLabel, sessionLabel, short, STATUS_LABEL, when, type BoardSession, type PendingPrompt } from '../shared/format.ts';
+import { ago, answerPrompt, cost, esc, markRead, projectLabel, sessionLabel, short, STATUS_LABEL, when, type BoardSession, type PendingPrompt } from '../shared/format.ts';
 import type { Live } from '../shared/live.ts';
-import { removeThing, renameThing } from '../shared/manage.ts';
+import { doneWith, removeThing, renameThing } from '../shared/manage.ts';
 import { openStart } from '../shared/start.ts';
 
 export interface SidebarOptions {
@@ -15,7 +15,15 @@ export interface SidebarOptions {
   onSession(id: string): void;
   /** A project's name was clicked. */
   onProject(name: string): void;
+  /** A session was ticked off the board with its ✓. */
+  onDone(id: string): void;
 }
+
+// A session's read and done buttons (decision 55), an open envelope and a tick drawn in pixels like the island.
+const pixels = (rows: string[]) => rows.flatMap((row, y) => [...row].map((p, x) => (p === '#' ? `<rect x="${x}" y="${y}" width="1" height="1"/>` : ''))).join('');
+const icon = (wide: number, tall: number, body: string) => `<svg viewBox="0 0 ${wide} ${tall}" width="${wide * 1.2}" height="${tall * 1.2}" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">${body}</svg>`;
+const OPENED = icon(11, 9, pixels(['.....#.....', '...##.##...', '.##.....##.', '#.........#', '##.......##', '#.##...##.#', '#...###...#', '#.........#', '###########']));
+const TICK = icon(9, 7, pixels(['........#', '.......##', '#.....##.', '##...##..', '.##.##...', '..###....', '...#.....']));
 
 export interface Sidebar {
   render(): void;
@@ -173,11 +181,18 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
       s.permissionMode && s.permissionMode !== 'default' ? `<span class="badge" data-mode="${esc(s.permissionMode)}">${esc(s.permissionMode)}</span>` : '',
     ].join('');
     const meta = [repoOf(s), s.lastTool ? esc(s.lastTool) : '', `<span data-since="${esc(s.lastAt)}"></span>`, s.usage ? esc(cost(s.usage.costUsd)) : ''].filter(Boolean).join(' · ');
-    return `<li class="row-item"><button type="button" class="row${options.current() === s.id ? ' open' : ''}" data-session="${esc(s.id)}" data-status="${esc(status)}">
+    const label = esc(sessionLabel(s));
+    // A session calling for me glows until I read it (decision 55): by opening it, or with its read button.
+    const read = s.unread ? `<button type="button" class="ghost small row-read" data-read-session="${esc(s.id)}" title="Mark as read: it stops glowing, and stays on the board" aria-label="Mark ${label} as read">${OPENED}</button>` : '';
+    return `<li class="row-item live"><button type="button" class="row${options.current() === s.id ? ' open' : ''}${s.unread ? ' unread' : ''}" data-session="${esc(s.id)}" data-status="${esc(status)}">
       <span class="dot" title="${esc(STATUS_LABEL[status] ?? 'Unknown')}"></span>
-      <span class="row-title">${s.name ? `<span class="row-name" title="Its mirling">${esc(s.name)}</span>` : ''}${esc(sessionLabel(s))}${badges}</span>
+      <span class="row-title">${s.name ? `<span class="row-name" title="Its mirling">${esc(s.name)}</span>` : ''}${label}${badges}</span>
       <span class="row-meta"><span class="row-status">${esc(STATUS_LABEL[status] ?? 'Unknown')}</span> · ${meta}</span>
-    </button><button type="button" class="ghost small row-rename" data-rename-session="${esc(s.id)}" title="Rename this session" aria-label="Rename ${esc(sessionLabel(s))}">✎</button></li>`;
+    </button><span class="row-actions">
+      <button type="button" class="ghost small row-rename" data-rename-session="${esc(s.id)}" title="Rename this session" aria-label="Rename ${label}">✎</button>
+      ${read}
+      <button type="button" class="ghost small row-done" data-done-session="${esc(s.id)}" title="Done: off the board until it does something new. It stays in Earlier conversations." aria-label="Done with ${label}">${TICK}</button>
+    </span></li>`;
   }
 
   // Relative times and countdowns move every second without redrawing.
@@ -203,6 +218,10 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
       void answerPrompt(promptId, answer as 'allow' | 'deny' | 'terminal').finally(() => { busy.delete(promptId); render(); });
       return;
     }
+    const read = pick('read-session');
+    if (read) return void markRead(read, true);
+    const done = pick('done-session');
+    if (done) return void doneWith(done).then((ok) => { if (ok) options.onDone(done); });
     const session = pick('session');
     if (session) return options.onSession(session);
     const project = pick('focus-project');

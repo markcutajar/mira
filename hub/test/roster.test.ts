@@ -29,6 +29,23 @@ describe('Roster', () => {
     assert.equal(statusOf(roster), 'my-turn');
   });
 
+  it('notes when a session calls for me: needing me, or a turn ending or failing, not only starting', () => {
+    const roster = new Roster();
+    roster.apply(ev('session.started', 'my-turn', 1));
+    assert.equal(roster.get('s-1')?.calledAt, undefined);
+    roster.apply(ev('prompt.submitted', 'working', 2, { ref: { promptId: 'p-1' } }));
+    roster.apply(ev('permission.requested', 'needs-me', 4, { ref: { promptId: 'p-1' } }));
+    assert.equal(roster.get('s-1')?.calledAt, '2026-10-25T18:00:04.000Z');
+    roster.apply(ev('turn.ended', 'my-turn', 9, { ref: { promptId: 'p-1' } }));
+    assert.equal(roster.get('s-1')?.calledAt, '2026-10-25T18:00:09.000Z');
+    // A reminder that it's still my turn isn't a new call.
+    roster.apply(ev('turn.waiting', 'my-turn', 30));
+    assert.equal(roster.get('s-1')?.calledAt, '2026-10-25T18:00:09.000Z');
+    roster.apply(ev('prompt.submitted', 'working', 40, { ref: { promptId: 'p-2' } }));
+    roster.apply(ev('turn.failed', 'failed', 50, { ref: { promptId: 'p-2' } }));
+    assert.equal(roster.get('s-1')?.calledAt, '2026-10-25T18:00:50.000Z');
+  });
+
   it('ignores an event older than the status it shows', () => {
     const roster = new Roster();
     roster.apply(ev('turn.ended', 'my-turn', 9));

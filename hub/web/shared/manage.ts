@@ -50,6 +50,11 @@ export function removeThing(kind: Kind, key: string, label: string): Promise<boo
   });
 }
 
+/** A session's ✓ on the board (decision 55): off the board at once, no question asked, until it does something new. */
+export function doneWith(id: string): Promise<boolean> {
+  return send('POST', `/api/remove/session/${encodeURIComponent(id)}`);
+}
+
 async function send(method: string, url: string, body?: unknown): Promise<boolean> {
   try {
     const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
