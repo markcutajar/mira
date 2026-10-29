@@ -34,6 +34,12 @@ const MAPS = {
   smoke: ['..gggg..', '.gGGGGg.', 'gGGhGGGg', 'gGhGGGGg', 'gGGGGGGg', 'gGGGGGgg', '.gGGGgg.', '..gggg..'],
   // Dots go in at row 4, columns 4, 7 and 10.
   thought: ['....oooo.oooo...', '..ooWWWWoWWWWoo.', '.oWWWWWWWWWWWWWo', 'oWWWWWWWWWWWWWWo', 'oWWWWWWWWWWWWWWo', '.oWWWWWWWWWWWWo.', '..ooWWWooWWWoo..', '....ooo..ooo....', '..oo............', '.oWWo...........', '..oo............', 'oo..............'],
+  // Sand falling through, from a full top bulb to a full bottom one.
+  hourglass: [
+    ['bbbbbbbbb', '.oWWWWWo.', '.oSSSSSo.', '..oSSSo..', '...oSo...', '...oSo...', '...oSo...', '..oWWWo..', '.oWWWWWo.', '.oWWSWWo.', 'bbbbbbbbb'],
+    ['bbbbbbbbb', '.oWWWWWo.', '.oWWWWWo.', '..oSSSo..', '...oSo...', '...oSo...', '...oSo...', '..oWWWo..', '.oWWSWWo.', '.oSSSSSo.', 'bbbbbbbbb'],
+    ['bbbbbbbbb', '.oWWWWWo.', '.oWWWWWo.', '..oWWWo..', '...oSo...', '...oSo...', '...oSo...', '..oWSWo..', '.oSSSSSo.', '.oSSSSSo.', 'bbbbbbbbb'],
+  ],
   book: {
     a: ['oo......oo', 'oWoo..ooWo', 'oWWWooWWWo', 'oWllWWllWo', 'oWWWWWWWWo', 'oBBBBBBBBo', '.oooooooo.'],
     b: ['oo...o..oo', 'oWoooWooWo', 'oWWWoWoWWo', 'oWllWoWlWo', 'oWWWWWWWWo', 'oBBBBBBBBo', '.oooooooo.'],
@@ -406,6 +412,7 @@ export function drawnArt(): Art {
       const rows = MAPS.thought.map((row, y) => (y === 4 ? [...row].map((ch, x) => ([4, 7, 10].slice(0, frame + 1).some((d) => x === d || x === d + 1) ? 'd' : ch)).join('') : row));
       pixelMap(names.thought(frame), rows, { o: '#2a2f45', W: '#f4f1e6', d: '#5a5f7a' });
     }
+    MAPS.hourglass.forEach((rows, frame) => pixelMap(names.hourglass(frame), rows, { b: '#a8744a', o: '#2a2f45', W: '#d6e9f5', S: '#ffd34d' }));
   }
 
   function tree(key: string, apples: boolean) {

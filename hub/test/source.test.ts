@@ -61,6 +61,28 @@ describe('Claude Code source', () => {
     assert.equal(adapter.ingest?.({ hook_event_name: 'CwdChanged', session_id: 's-10', old_cwd: 'C:\\code\\garden', new_cwd: 'C:\\tmp' }, at)?.system, 'garden');
   });
 
+  it('ends a turn waiting on work it started, but not on a server left running from before', () => {
+    const adapter = claudeCode({ projectsDir: dir, placeFor: () => ({ system: 'mira' }), costOf: makeCostOf() });
+    const at = new Date('2026-10-25T18:00:00.000Z');
+    const shell = (id: string) => ({ id, type: 'shell', status: 'running', description: 'x', command: 'y' });
+    const helper = { id: 'a-1', type: 'subagent', status: 'running', description: 'x', agent_type: 'reviewer' };
+    const stop = (session: string, tasks: unknown[]) => adapter.ingest?.({ hook_event_name: 'Stop', session_id: session, cwd: 'C:\\code\\mira', background_tasks: tasks }, at);
+    adapter.ingest?.({ hook_event_name: 'SessionStart', session_id: 's-20', cwd: 'C:\\code\\mira', source: 'startup' }, at);
+    // A script started this turn: waiting on it.
+    const first = stop('s-20', [shell('b-1')]);
+    assert.equal(first?.status, 'waiting');
+    assert.deepEqual(first?.detail?.waitingOn, ['shell']);
+    // The next turn ends with the same one still running, like a dev server: my turn.
+    assert.equal(stop('s-20', [shell('b-1')])?.status, 'my-turn');
+    // A new one, or a subagent, makes it wait again; a subagent always does.
+    assert.deepEqual(stop('s-20', [shell('b-1'), shell('b-2')])?.detail?.waitingOn, ['shell']);
+    assert.deepEqual(stop('s-20', [shell('b-1'), shell('b-2'), helper])?.detail?.waitingOn, ['subagent']);
+    assert.equal(stop('s-20', [])?.status, 'my-turn');
+    // A session from before the hub started: only its subagents count, since there's no last turn to go by.
+    assert.equal(stop('s-21', [shell('b-3')])?.status, 'my-turn');
+    assert.deepEqual(stop('s-22', [helper])?.detail?.waitingOn, ['subagent']);
+  });
+
   it('links a session to the Claude Code extension, by its UUID only', () => {
     const id = '673391f2-21ec-4c16-b57b-8dadae724ac0';
     assert.deepEqual(source.continueAt?.({ ...session(transcript), id, cwd: 'C:\\code\\mira' }), { folder: 'C:\\code\\mira', link: `vscode://anthropic.claude-code/open?session=${id}` });

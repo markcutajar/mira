@@ -10,7 +10,7 @@ import type { CostOf } from '../pricing.ts';
 import type { SourceAdapter } from '../sources.ts';
 import type { Place } from '../systems.ts';
 import { Inboxes, MAX_MESSAGE } from './inbox.ts';
-import { normalise } from './normalise.ts';
+import { backgroundTasks, normalise, type HookPayload } from './normalise.ts';
 import { activeSessions, helperAt, helpersOf, isInside, pastSessions, readStory, sessionTitle, turnsOf, writeTitle, type Turn } from './transcripts.ts';
 
 export interface ClaudeCodeOptions {
@@ -44,6 +44,27 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
     if (projects.size > PROJECTS_KEPT) projects.delete(projects.keys().next().value as string);
   };
 
+  // What was still running when each session's last turn ended (decision 56). A turn that ends with
+  // a subagent out, or with work that wasn't running at the last turn's end, is waiting on it; a
+  // server left running from an earlier turn doesn't count. A session the hub only met after it
+  // started has no last turn to go by, so only its subagents count.
+  const running = new Map<string, Set<string>>();
+  const ran = (sessionId: string, ids: Set<string>) => {
+    running.delete(sessionId);
+    running.set(sessionId, ids);
+    if (running.size > PROJECTS_KEPT) running.delete(running.keys().next().value as string);
+  };
+  function waitingOn(sessionId: string, payload: HookPayload): string[] {
+    const hook = payload.hook_event_name;
+    // A new Claude Code process has nothing running yet.
+    if (hook === 'SessionStart' && (payload.source === 'startup' || payload.source === 'resume')) ran(sessionId, new Set());
+    if (hook !== 'Stop') return [];
+    const tasks = backgroundTasks(payload);
+    const before = running.get(sessionId);
+    ran(sessionId, new Set(tasks.map((t) => t.id)));
+    return tasks.filter((t) => t.kind === 'subagent' || (before !== undefined && !before.has(t.id))).map((t) => t.kind);
+  }
+
   const helperEvents = (file: string, sessionId: string, system: string, name?: string) => {
     const helper = helperAt(file, costOf);
     const actor = compact({ kind: 'subagent' as const, id: helper.id, parent: sessionId, name: name ?? helper.name });
@@ -68,7 +89,7 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
       const token = headers?.['x-mira-inbox-token'];
       if (payload.hook_event_name === 'SessionEnd') inboxes.forget(sessionId);
       else if (SESSION_ID.test(sessionId) && socket && token) inboxes.note(sessionId, socket, token, at);
-      return normalise(payload, { at: at.toISOString(), system });
+      return normalise(payload, { at: at.toISOString(), system, waitingOn: sessionId ? waitingOn(sessionId, payload) : [] });
     },
 
     discover(sinceMs) {

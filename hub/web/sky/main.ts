@@ -143,7 +143,11 @@ function renderConnection() {
 
 function renderCounts() {
   const counts: Record<string, number> = { working: 0, 'needs-me': 0, 'my-turn': 0, failed: 0 };
-  for (const s of live.sessions) if (s.status && s.status in counts) counts[s.status] = (counts[s.status] ?? 0) + 1;
+  // One waiting on its own work counts as working (decision 56).
+  for (const s of live.sessions) {
+    const status = s.status === 'waiting' ? 'working' : s.status;
+    if (status && status in counts) counts[status] = (counts[status] ?? 0) + 1;
+  }
   for (const [status, n] of Object.entries(counts)) $(`n-${status}`).textContent = String(n);
   const needs = Math.max(counts['needs-me'] ?? 0, live.pending.length);
   const chip = $<HTMLButtonElement>('chip-needs');

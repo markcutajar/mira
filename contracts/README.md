@@ -17,7 +17,7 @@
 | `system` | The project the event belongs to, which is one section of the island. |
 | `actor` | Who: `{ kind, id, parent?, name? }`, where `kind` is `session` or `subagent`. A subagent's `parent` is its session. |
 | `type` | What happened, for example `tool.started` or `permission.requested`. |
-| `status` | The status this event implies for its actor, when it implies one: `working`, `needs-me`, `my-turn`, `failed` or `ended`. |
+| `status` | The status this event implies for its actor, when it implies one: `working`, `waiting`, `needs-me`, `my-turn`, `failed` or `ended`. `waiting` means its turn ended while work it started runs on, and it carries on by itself when that work reports back. |
 | `detail` | Small facts to show at a glance: tool name, notification type, a reason code, a duration, a model, a working directory. |
 | `usage` | Tokens and cost, when known. A cost the hub worked out from its price table is an estimate. |
 | `ref` | Pointers for fetching content on demand: transcript paths, and prompt and tool-use IDs. |
@@ -44,7 +44,7 @@ Every event also keeps the session ID as `actor.id`, the working directory as `d
 | `PermissionDenied` | `permission.denied` | `working` | Tool name |
 | `Notification` | `notification` | `needs-me` for `permission_prompt`, `elicitation_dialog` and `agent_needs_input`; `my-turn` for `agent_completed`; otherwise unchanged | Notification type, not the message |
 | `Notification` (`idle_prompt`) | `turn.waiting` | `my-turn` | |
-| `Stop` | `turn.ended` | `my-turn` | Nothing; not the last assistant message |
+| `Stop` | `turn.ended` | `my-turn`, or `waiting` while work it started runs on (below) | The kind of each task it waits on, as `waitingOn`; never a task's command or description, nor the last assistant message |
 | `StopFailure` | `turn.failed` | `failed` | Error type (`rate_limit`, `overloaded`…) as `reason` |
 | `SubagentStart` | `subagent.started` | `working`, on the subagent | Agent type as the subagent's name, session as its parent |
 | `SubagentStop` | `subagent.stopped` | `ended`, on the subagent | Subagent transcript path |
@@ -52,6 +52,8 @@ Every event also keeps the session ID as `actor.id`, the working directory as `d
 | `SessionEnd` | `session.ended` | `ended` | Reason |
 | Mira answers a prompt | `permission.answered` | `working` | `decision` and `answeredBy: mira` |
 | The transcript reader, after a turn ends | `usage.reported` | unchanged | The turn's input, output and cache tokens, the context size, the model as `detail.model`, and estimated cost. A subagent's turns are reported on the subagent. |
+
+**Waiting.** `Stop` lists the session's background tasks still in flight. The turn ends `waiting` when one of them is a subagent, which always reports back, or wasn't running when the session's previous turn ended, such as a script it started this turn. One still running from before, like a dev server, doesn't count, so the turn ends `my-turn`. The hub remembers each session's tasks from its last `Stop` in memory; for a session it met only after starting, only subagents count (decision 56).
 
 **Usage.** No hook carries token counts, which the recordings confirmed, so `usage.reported` comes from the transcript reader, the one module that parses Claude Code transcripts (decision 23). There's one event per finished turn, and its ID is derived from the actor and the turn, so the live report and the startup catch-up never count a turn twice. `costUsd` is the hub's estimate from its price table, left out for a model with no price. `SessionStart` gives estimates when a session resumes.
 

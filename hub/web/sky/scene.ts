@@ -8,7 +8,7 @@ import { ACCENT_COLOUR, ACCENTS, MAX_LEVEL, names, WATERFALL_FRAMES, type Accent
 import { arrange, BUILDING_LABEL, destinations, edit, isItem, isPiece, ITEMS, move, movePiece, onWater, pieceAt, PIECES, placeOf, restyle, sameLayouts, unreachable, type ItemKind, type Outcome, type PieceKind, type Placed, type SectionLayout, type Tool, type Where } from './build.ts';
 import { findPath, generateCells, hash, SEC, sectionOrigin, spotsAround, type BuildingType, type Cell, type Spot, type Template } from './world.ts';
 
-type Status = 'working' | 'needs-me' | 'my-turn' | 'failed' | 'ended';
+type Status = 'working' | 'waiting' | 'needs-me' | 'my-turn' | 'failed' | 'ended';
 type Image = Phaser.GameObjects.Image;
 type Text = Phaser.GameObjects.Text;
 
@@ -104,8 +104,8 @@ interface Mirling {
   /** The tool running now, from its start to its finish, and what that has the mirling doing. */
   tool: string | null;
   act: Act | null;
-  /** What it holds while it works, or the bubble over it while it thinks. */
-  gear: { prop?: Image; thought?: Image; swing?: { t: number } };
+  /** What it holds while it works, the bubble over it while it thinks, or the hourglass while it waits on its own work. */
+  gear: { prop?: Image; thought?: Image; hourglass?: Image; swing?: { t: number } };
   /** Where it's playing while it waits for me. */
   play: Play | null;
   /** Up on a swing, the slide or a ring, off the tiles it walks; it hops back down to `cell` before walking on. */
@@ -458,7 +458,7 @@ export class SkyScene extends Phaser.Scene {
   // A book with turning pages, a hammer swinging, a console flickering, or a thought bubble's dots.
   #placeGear(col: Mirling, x: number, y: number, head: number, time: number, thoughtScale: number): void {
     const A = this.#art.scale;
-    const { prop, thought, swing } = col.gear;
+    const { prop, thought, hourglass, swing } = col.gear;
     const f = col.facing;
     const depth = (col.depth ?? col.pos.y) + 0.2;
     const beat = (ms: number) => (reduceMotion ? 0 : Math.floor(time / ms + col.phase * 4) % 2);
@@ -466,6 +466,8 @@ export class SkyScene extends Phaser.Scene {
     if (prop && col.act === 'run') prop.setTexture(names.prop(beat(300) ? 'console.b' : 'console.a')).setPosition(x + f * 11, y + 1).setDepth(depth);
     if (prop && col.act === 'make') prop.setPosition(x + f * 8, y - 5).setFlipX(f < 0).setAngle(f * (-65 + 85 * (swing?.t ?? 0))).setDepth(depth);
     thought?.setTexture(names.thought(reduceMotion ? 2 : Math.floor(time / 450) % 3)).setPosition(x + 6 * A, head).setScale(thoughtScale);
+    // Narrower than a thought bubble, so drawn larger to read as well.
+    hourglass?.setTexture(names.hourglass(reduceMotion ? 1 : Math.floor(time / 900 + col.phase * 3) % 3)).setPosition(x + 6 * A, head).setScale(thoughtScale * 1.5);
   }
 
   // Swing seats hang from their frames on ropes, still, or swinging with a mirling sat on them.
@@ -752,7 +754,7 @@ export class SkyScene extends Phaser.Scene {
     const sec = this.#sections.find((x) => x.name === s.system) as Section;
     const home = [...sec.houses].sort((a, b) => a.residents - b.residents)[0] as Building;
     const work = this.#workFor(sec, s.lastTool);
-    const cell = s.status === 'working' ? pickOne(this.#workSpots(work)) : home.door;
+    const cell = s.status === 'working' || s.status === 'waiting' ? pickOne(this.#workSpots(work)) : home.door;
     const pos = this.#spotXY(cell);
     const palette: Palette = 'y';
     const sprite = this.add.image(pos.x, pos.y, names.creature(palette, 'a')).setOrigin(0.5, 1);
@@ -849,6 +851,8 @@ export class SkyScene extends Phaser.Scene {
       if (col.aloft) this.#walkTo(col, col.cell);
     } else if (status === 'ended') {
       this.#walkTo(col, col.home.door, () => this.#retire(col, false));
+    } else if (status === 'waiting') {
+      this.#wait(col);
     } else if (status === 'my-turn') {
       // My turn: it goes to play until I reply, with a speech bubble so I know it's waiting (decision 41).
       this.#addBubble(col);
@@ -912,7 +916,21 @@ export class SkyScene extends Phaser.Scene {
   #putDown(col: Mirling): void {
     if (col.gear.swing) this.tweens.killTweensOf(col.gear.swing);
     col.gear.prop?.destroy();
-    col.gear = { thought: col.gear.thought };
+    col.gear = { thought: col.gear.thought, hourglass: col.gear.hourglass };
+  }
+
+  // -- waiting on its own work (decision 56) --
+
+  /** Watches the workshop's console, with an hourglass over its head, until the work it started reports back. */
+  #wait(col: Mirling): void {
+    col.work = this.#workFor(col.sec, 'Bash');
+    col.gear.hourglass = this.add.image(col.pos.x, col.pos.y, names.hourglass(0)).setOrigin(0.5, 1).setDepth(500000);
+    this.#walkTo(col, pickOne(this.#workSpots(col.work)), () => {
+      if (col.status !== 'waiting' || col.removed) return;
+      col.act = 'run';
+      col.facing = col.work.x < col.pos.x ? -1 : 1;
+      col.gear.prop = this.add.image(col.pos.x, col.pos.y, names.prop('console.a')).setOrigin(0.5, 1);
+    });
   }
 
   // Thinking: a slow walk to somewhere nearby in its section, a pause, and on again.
@@ -935,6 +953,7 @@ export class SkyScene extends Phaser.Scene {
     col.later = [];
     this.#putDown(col);
     col.gear.thought?.destroy();
+    col.gear.hourglass?.destroy();
     col.gear = {};
     col.act = null;
     const play = col.play;

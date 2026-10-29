@@ -27,7 +27,7 @@ body { margin: 0; background: var(--void); color: var(--ink); font: 14px/1.45 va
 button { font: inherit; }
 button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--thronglet); outline-offset: 2px; }
 
-[data-status="working"] { --c: var(--working); }
+[data-status="working"], [data-status="waiting"] { --c: var(--working); }
 [data-status="needs-me"] { --c: var(--beacon); }
 [data-status="my-turn"] { --c: var(--turn); }
 [data-status="failed"] { --c: var(--failed); }

@@ -74,6 +74,8 @@
   .row:focus-visible { outline: 2px solid var(--thronglet); outline-offset: -2px; }
   .dot { grid-area: dot; width: 8px; height: 8px; margin-top: 6px; background: var(--c); }
   .row[data-status="needs-me"] .dot { animation: blink 1s steps(2) infinite; }
+  /* Waiting on its own work (decision 56): a hollow dot, busy but not at it. */
+  .row[data-status="waiting"] .dot { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
   @keyframes blink { 50% { opacity: 0.25; } }
   .row-title { grid-area: title; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row-name { margin-right: 6px; color: var(--thronglet); font-weight: 600; }

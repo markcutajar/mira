@@ -7,7 +7,17 @@ import type { PendingPrompt } from '../../src/permissions.ts';
 export type BoardSession = SessionView & { name?: string; title?: string; worktree?: string; repo?: string; canMessage?: boolean; unread?: boolean };
 export type { PendingPrompt };
 
-export const STATUS_LABEL: Record<string, string> = { 'needs-me': 'Needs you', failed: 'Failed', 'my-turn': 'Your turn', working: 'Working', ended: 'Ended' };
+const STATUS_LABEL: Record<string, string> = { 'needs-me': 'Needs you', failed: 'Failed', 'my-turn': 'Your turn', working: 'Working', waiting: 'Waiting', ended: 'Ended' };
+
+// What a waiting session waits on, by the kind of task Claude Code names (decision 56).
+const TASK_NAMES: Record<string, string> = { shell: 'a command', subagent: 'a subagent', monitor: 'a monitor', workflow: 'a workflow', teammate: 'a teammate', 'cloud session': 'a cloud session', 'MCP task': 'an MCP task' };
+
+/** A session's status in words: "Your turn", or for one waiting, what on, such as "Waiting on a command". */
+export function statusLabel(s: BoardSession): string {
+  if (s.status !== 'waiting') return STATUS_LABEL[s.status ?? ''] ?? 'Unknown';
+  const kinds = s.waitingOn ?? [];
+  return `Waiting on ${kinds.length === 1 ? (TASK_NAMES[kinds[0] as string] ?? 'a task') : kinds.length ? `${kinds.length} tasks` : 'its tasks'}`;
+}
 
 export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
 export const folder = (path?: string) => (path ? path.split(/[\\/]/).filter(Boolean).pop() ?? '' : '');

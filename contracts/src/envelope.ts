@@ -10,7 +10,8 @@ export const CONTRACT_VERSION = 1;
 export const Source = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, 'lower-case letters, digits and dashes');
 export type Source = z.infer<typeof Source>;
 
-export const Status = z.enum(['working', 'needs-me', 'my-turn', 'failed', 'ended']);
+/** `waiting`: its turn ended while work it started runs on, and it carries on by itself when that work reports back (decision 56). */
+export const Status = z.enum(['working', 'waiting', 'needs-me', 'my-turn', 'failed', 'ended']);
 export type Status = z.infer<typeof Status>;
 
 export const EventType = z.enum([
@@ -66,6 +67,8 @@ export const Detail = z.strictObject({
   model: label.optional(),
   cwd: path.optional(),
   previousCwd: path.optional(),
+  /** A turn that ended waiting: the kind of each piece of work it waits on, such as `shell` or `subagent`, never what that work is. */
+  waitingOn: z.array(label).max(20).optional(),
 });
 export type Detail = z.infer<typeof Detail>;
 

@@ -46,6 +46,28 @@ describe('Roster', () => {
     assert.equal(roster.get('s-1')?.calledAt, '2026-10-25T18:00:50.000Z');
   });
 
+  it("waits on a session's own work without calling for me, then calls once it's done", () => {
+    const roster = new Roster();
+    roster.apply(ev('prompt.submitted', 'working', 1, { ref: { promptId: 'p-1' } }));
+    roster.apply(ev('turn.ended', 'waiting', 5, { ref: { promptId: 'p-1' }, detail: { waitingOn: ['shell'] } }));
+    assert.equal(statusOf(roster), 'waiting');
+    assert.deepEqual(roster.get('s-1')?.waitingOn, ['shell']);
+    assert.equal(roster.get('s-1')?.calledAt, undefined);
+    // Its subagent's events don't change that.
+    roster.apply(ev('tool.started', 'working', 8, { actor: { kind: 'subagent', id: 'a-1', parent: 's-1' }, ref: { promptId: 'p-1' } }));
+    assert.equal(statusOf(roster), 'waiting');
+    // The work reports back: it carries on, then ends its turn.
+    roster.apply(ev('prompt.submitted', 'working', 20, { ref: { promptId: 'p-2' } }));
+    assert.equal(roster.get('s-1')?.waitingOn, undefined);
+    roster.apply(ev('turn.ended', 'my-turn', 25, { ref: { promptId: 'p-2' } }));
+    assert.equal(roster.get('s-1')?.calledAt, '2026-10-25T18:00:25.000Z');
+    // Woken without a prompt of its own, its turn ending still calls.
+    roster.apply(ev('prompt.submitted', 'working', 30, { ref: { promptId: 'p-3' } }));
+    roster.apply(ev('turn.ended', 'waiting', 35, { ref: { promptId: 'p-3' }, detail: { waitingOn: ['subagent'] } }));
+    roster.apply(ev('turn.ended', 'my-turn', 50, { ref: { promptId: 'p-4' } }));
+    assert.equal(roster.get('s-1')?.calledAt, '2026-10-25T18:00:50.000Z');
+  });
+
   it('ignores an event older than the status it shows', () => {
     const roster = new Roster();
     roster.apply(ev('turn.ended', 'my-turn', 9));

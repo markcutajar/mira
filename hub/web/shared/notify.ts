@@ -39,6 +39,8 @@ const KEY = 'mira.notify';
 const SETTLE_MS = 600;
 // A turn shorter than this I was most likely watching, so its end isn't worth a notification.
 const LONG_TURN_MS = 20_000;
+// Busy, whether at it or waiting on work it started (decision 56): one stretch, however it ends.
+const BUSY = new Set(['working', 'waiting']);
 const ICON = '/mirling.png';
 
 type Worth = 'needs-me' | 'failed' | 'my-turn';
@@ -153,11 +155,12 @@ export function createNotifier(options: NotifierOptions): Notifier {
         if (!s.unread) forget(s.id);
         const before = last.get(s.id);
         if (before?.status === s.status) continue;
-        last.set(s.id, { status: s.status, since: now });
+        const stillBusy = BUSY.has(before?.status ?? '') && BUSY.has(s.status ?? '');
+        last.set(s.id, { status: s.status, since: stillBusy && before ? before.since : now });
         // One that's no longer true goes away.
         if (shown.has(s.id) && shown.get(s.id)?.status !== s.status) forget(s.id);
         if (!primed) continue;
-        const longTurn = before?.status === 'working' && now - before.since >= LONG_TURN_MS;
+        const longTurn = BUSY.has(before?.status ?? '') && before !== undefined && now - before.since >= LONG_TURN_MS;
         if (s.status === 'needs-me' || s.status === 'failed' || (s.status === 'my-turn' && longTurn)) {
           const status = s.status;
           setTimeout(() => fire(s.id, status), SETTLE_MS);

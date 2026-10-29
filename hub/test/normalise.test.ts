@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import { normalise } from '../src/claude-code/normalise.ts';
+import { backgroundTasks, normalise } from '../src/claude-code/normalise.ts';
 
 const ctx = { at: '2026-10-25T18:31:47.221Z', system: 'mira' };
 const base = { session_id: 's-1', transcript_path: 'C:\\Users\\markc\\.claude\\projects\\mira\\s-1.jsonl', cwd: 'C:\\code\\mira', permission_mode: 'default', prompt_id: 'p-1' };
@@ -50,6 +50,20 @@ describe('normalise', () => {
     assert.equal(event?.status, 'failed');
     assert.equal(event?.detail?.reason, 'rate_limit');
     assert.doesNotMatch(JSON.stringify({ ...event, id: undefined }), /API Error|429/); // a random id can contain 429
+  });
+
+  it('ends a turn waiting when the source says what on, keeping only the kinds of work', () => {
+    const tasks = [{ id: 'b1x2y3z4w', type: 'shell', status: 'running', description: 'Run the test suite', command: 'npm test -- --secret-flag' }, { id: 'a9', type: 'subagent', status: 'running', description: 'Review the diff', agent_type: 'reviewer' }];
+    assert.deepEqual(backgroundTasks({ background_tasks: tasks }), [{ id: 'b1x2y3z4w', kind: 'shell' }, { id: 'a9', kind: 'subagent' }]);
+    assert.deepEqual(backgroundTasks({ background_tasks: 'nonsense' }), []);
+    const waiting = normalise({ ...base, hook_event_name: 'Stop', background_tasks: tasks, last_assistant_message: 'Running the tests now' }, { ...ctx, waitingOn: ['shell'] });
+    assert.equal(waiting?.type, 'turn.ended');
+    assert.equal(waiting?.status, 'waiting');
+    assert.deepEqual(waiting?.detail?.waitingOn, ['shell']);
+    assert.doesNotMatch(JSON.stringify(waiting), /secret-flag|test suite|Review the diff|Running the tests/);
+    // With nothing it waits on, it's my turn, whatever else is running.
+    assert.equal(normalise({ ...base, hook_event_name: 'Stop', background_tasks: tasks }, { ...ctx, waitingOn: [] })?.status, 'my-turn');
+    assert.equal(normalise({ ...base, hook_event_name: 'PostToolUse', tool_name: 'Bash' }, { ...ctx, waitingOn: ['shell'] })?.status, 'working');
   });
 
   it('records where a session moved', () => {

@@ -35,6 +35,8 @@ export interface SessionView {
   seenIn: 'events' | 'transcript';
   /** When it last called for me, as it happened: it started needing me, or a turn ended or failed. It's unread from then until I read it (decision 55). */
   calledAt?: string;
+  /** While it's waiting: the kind of each piece of work it waits on, such as `shell` (decision 56). */
+  waitingOn?: string[];
   subagents: SubagentView[];
   /** Totals from usage events: every turn that has finished, the session's and its subagents'. */
   usage?: SessionUsage;
@@ -101,9 +103,12 @@ export class Roster {
       return;
     }
     if (s.status === 'needs-me' && event.type === 'tool.started') return;
-    // Starting to need me, and a turn that ends or fails, call for me; a session that only started doesn't.
-    const ends = event.status === 'my-turn' && (s.status === 'working' || s.status === 'needs-me');
+    // Starting to need me, and a turn that ends or fails, call for me; a session that only started
+    // doesn't, nor one whose turn ended waiting on its own work, until it's done.
+    const ends = event.status === 'my-turn' && (s.status === 'working' || s.status === 'needs-me' || s.status === 'waiting');
     if (event.status !== s.status && (ends || event.status === 'needs-me' || event.status === 'failed')) s.calledAt = event.at;
+    if (event.status === 'waiting') s.waitingOn = event.detail?.waitingOn ?? [];
+    else delete s.waitingOn;
     s.status = event.status;
     s.statusAt = event.at;
   }

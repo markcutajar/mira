@@ -2,7 +2,7 @@
 // project with its sessions and, folded away, its earlier conversations (decision 40). A session row
 // flies to its mirling and opens its story.
 
-import { ago, answerPrompt, cost, esc, markRead, projectLabel, sessionLabel, short, STATUS_LABEL, when, type BoardSession, type PendingPrompt } from '../shared/format.ts';
+import { ago, answerPrompt, cost, esc, markRead, projectLabel, sessionLabel, short, statusLabel, when, type BoardSession, type PendingPrompt } from '../shared/format.ts';
 import type { Live } from '../shared/live.ts';
 import { doneWith, removeThing, renameThing } from '../shared/manage.ts';
 import { openStart } from '../shared/start.ts';
@@ -45,7 +45,7 @@ interface Fold {
 
 const EARLIER_PAGE = 20;
 
-const ORDER = ['needs-me', 'failed', 'my-turn', 'working', 'ended', null];
+const ORDER = ['needs-me', 'failed', 'my-turn', 'working', 'waiting', 'ended', null];
 const rank = (s?: BoardSession) => ORDER.indexOf(s?.status ?? null);
 
 export function createSidebar(root: HTMLElement, options: SidebarOptions): Sidebar {
@@ -185,9 +185,9 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
     // A session calling for me glows until I read it (decision 55): by opening it, or with its read button.
     const read = s.unread ? `<button type="button" class="ghost small row-read" data-read-session="${esc(s.id)}" title="Mark as read: it stops glowing, and stays on the board" aria-label="Mark ${label} as read">${OPENED}</button>` : '';
     return `<li class="row-item live"><button type="button" class="row${options.current() === s.id ? ' open' : ''}${s.unread ? ' unread' : ''}" data-session="${esc(s.id)}" data-status="${esc(status)}">
-      <span class="dot" title="${esc(STATUS_LABEL[status] ?? 'Unknown')}"></span>
+      <span class="dot" title="${esc(statusLabel(s))}"></span>
       <span class="row-title">${s.name ? `<span class="row-name" title="Its mirling">${esc(s.name)}</span>` : ''}${label}${badges}</span>
-      <span class="row-meta"><span class="row-status">${esc(STATUS_LABEL[status] ?? 'Unknown')}</span> · ${meta}</span>
+      <span class="row-meta"><span class="row-status">${esc(statusLabel(s))}</span> · ${meta}</span>
     </button><span class="row-actions">
       <button type="button" class="ghost small row-rename" data-rename-session="${esc(s.id)}" title="Rename this session" aria-label="Rename ${label}">✎</button>
       ${read}

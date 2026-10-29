@@ -7,7 +7,7 @@ import type { Story, StoryStep, StoryTurn, UsageTotals } from '../../src/sources
 import { showDialog } from './dialog.ts';
 import { removeThing, renameThing } from './manage.ts';
 import { openTerminal, type TerminalState, type TerminalView } from './terminal.ts';
-import { answerPrompt, cost, esc, folder, plural, short, STATUS_LABEL, sessionLabel, toast, tokens, when, type BoardSession, type PendingPrompt } from './format.ts';
+import { answerPrompt, cost, esc, folder, plural, short, statusLabel, sessionLabel, toast, tokens, when, type BoardSession, type PendingPrompt } from './format.ts';
 
 export interface PanelOptions {
   session(id: string): BoardSession | undefined;
@@ -293,7 +293,7 @@ export function createPanel(options: PanelOptions): Panel {
     const name = session ? sessionLabel(session) : short(state.id);
     title.textContent = state.helper ? state.helperName || 'Subagent' : name;
     $('sub').textContent = state.helper ? `Subagent of ${name}`
-      : session ? [...new Set([session.name ?? '', options.projectLabel?.(session.system) ?? session.system, folder(session.cwd)])].concat(STATUS_LABEL[session.status ?? ''] ?? []).filter(Boolean).join(' · ') : '';
+      : session ? [...new Set([session.name ?? '', options.projectLabel?.(session.system) ?? session.system, folder(session.cwd)])].concat(session.status ? statusLabel(session) : []).filter(Boolean).join(' · ') : '';
     $('back').hidden = !state.helper;
     const terminal = $('terminal');
     terminal.hidden = Boolean(state.helper) || !state.terminal.available;

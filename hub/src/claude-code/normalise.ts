@@ -9,6 +9,8 @@ export type HookPayload = Record<string, unknown>;
 export interface NormaliseContext {
   at: string;
   system: string;
+  /** For a Stop: the kinds of work the turn ended waiting on, which only the source can tell, since it remembers what ran before (decision 56). */
+  waitingOn?: string[];
 }
 
 const text = (value: unknown, max: number) => (typeof value === 'string' && value.length > 0 && value.length <= max ? value : undefined);
@@ -20,6 +22,17 @@ const count = (value: unknown) => (typeof value === 'number' && Number.isFinite(
 function compact<T extends Record<string, unknown>>(obj: T): T | undefined {
   const kept = Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
   return Object.keys(kept).length ? (kept as T) : undefined;
+}
+
+/** The background tasks a Stop says are still in flight: each one's ID and kind, never its command or description. */
+export function backgroundTasks(payload: HookPayload): Array<{ id: string; kind: string }> {
+  const tasks = Array.isArray(payload.background_tasks) ? (payload.background_tasks as unknown[]) : [];
+  return tasks.flatMap((task) => {
+    const t = task && typeof task === 'object' ? (task as Record<string, unknown>) : {};
+    const taskId = id(t.id);
+    const kind = label(t.type);
+    return taskId && kind ? [{ id: taskId, kind }] : [];
+  });
 }
 
 export function normalise(payload: HookPayload, ctx: NormaliseContext): MiraEvent | null {
@@ -35,6 +48,10 @@ export function normalise(payload: HookPayload, ctx: NormaliseContext): MiraEven
     ? compact({ kind: 'subagent' as const, id: agentId, parent: sessionId, name: label(payload.agent_type) })
     : { kind: 'session' as const, id: sessionId };
 
+  // A turn that ends with work it started still running waits on that work, not on me (decision 56).
+  const waitingOn = hook === 'Stop' ? ctx.waitingOn?.flatMap((kind) => label(kind) ?? []).slice(0, 20) : undefined;
+  const waiting = Boolean(waitingOn?.length);
+
   const reasons: Record<string, unknown> = { SessionStart: payload.source, SessionEnd: payload.reason, StopFailure: payload.error };
   const detail = compact({
     tool: label(payload.tool_name),
@@ -45,6 +62,7 @@ export function normalise(payload: HookPayload, ctx: NormaliseContext): MiraEven
     permissionMode: label(payload.permission_mode),
     cwd: path(hook === 'CwdChanged' ? payload.new_cwd : payload.cwd),
     previousCwd: hook === 'CwdChanged' ? path(payload.old_cwd) : undefined,
+    waitingOn: waiting ? waitingOn : undefined,
   });
 
   const estimate = hook === 'SessionStart'
@@ -67,7 +85,7 @@ export function normalise(payload: HookPayload, ctx: NormaliseContext): MiraEven
     system: ctx.system,
     actor,
     type: rule.type,
-    status: rule.status,
+    status: waiting ? ('waiting' as const) : rule.status,
     detail,
     usage,
     ref,
