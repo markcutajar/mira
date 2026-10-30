@@ -16,6 +16,7 @@
     "hub:status": "node --disable-warning=ExperimentalWarning hub/src/control.ts status",
     "hub:login": "node --disable-warning=ExperimentalWarning hub/src/control.ts login",
     "hub:login-off": "node --disable-warning=ExperimentalWarning hub/src/control.ts login-off",
+    "update": "node --disable-warning=ExperimentalWarning hub/src/updater.ts",
     "app": "electron app",
     "icons": "node app/icons.ts",
     "typecheck": "tsc -p . && tsc -p tsconfig.web.json",

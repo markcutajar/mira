@@ -35,11 +35,26 @@
   button.chip { cursor: pointer; }
   button.chip:disabled { cursor: default; color: var(--dim); opacity: 1; }
   .chip.on { border-color: var(--beacon); animation: beat 1.2s steps(2) infinite; }
+  #chip-next.on { border-color: var(--thronglet); animation: none; }
   @keyframes beat { 50% { box-shadow: 0 0 0 2px var(--void), 0 0 0 4px var(--beacon-dim); } }
 
   .status { display: flex; align-items: center; gap: 14px; padding: 7px 12px; }
   .hold { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--dim); cursor: pointer; }
   .hold input { accent-color: var(--thronglet); }
+  #update-chip b { font-family: var(--font-data); font-weight: 500; }
+  /* Settings (decisions 59 and 60): a panel under the top bar, over the story when it's open. */
+  .settings { position: fixed; z-index: 5; width: min(360px, calc(100% - 32px)); max-height: calc(100% - 90px); overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .settings .eyebrow { margin: 6px 0 0; }
+  .settings .eyebrow:first-child { margin-top: 0; }
+  .settings .hold { color: var(--ink); }
+  .settings .hold:has(input:disabled) { color: var(--dim); cursor: default; }
+  .update { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+  .update p { margin: 0; }
+  .update code { font-family: var(--font-data); font-size: 12px; color: var(--dim); }
+  .update ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; max-height: 180px; overflow: auto; }
+  .update li { display: flex; gap: 8px; font-size: 12.5px; }
+  .update .warn { color: var(--failed); }
+  .update-go { display: flex; gap: 6px; flex-wrap: wrap; }
   .conn { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); }
   .conn::before { content: ""; width: 8px; height: 8px; background: var(--working); }
   .conn[data-state="down"]::before { background: var(--failed); }
@@ -109,6 +124,9 @@
   @keyframes glow { 50% { background: color-mix(in srgb, var(--c) 22%, transparent); } }
   .badge { margin-left: 6px; padding: 0 5px; border: 1px solid var(--hull-edge); font: 10px var(--font-data); color: var(--dim); vertical-align: 1px; }
   .badge.tree { border-color: var(--turn); color: var(--turn); }
+  .badge.clash { display: inline-flex; align-items: center; gap: 4px; border-color: var(--thronglet); color: var(--thronglet); }
+  .badge.clash svg { width: 5px; height: 8px; }
+  .row-meta .badge.clash { margin-left: 0; }
   .badge[data-mode="bypassPermissions"] { border-color: var(--failed); color: var(--failed); }
   .title-btn { all: unset; cursor: pointer; }
   .title-btn:hover { color: var(--thronglet); }
@@ -178,10 +196,12 @@
       <button type="button" class="chip glass" id="chip-needs" data-status="needs-me" title="Go to the next mirling that needs you" disabled><i></i>Needs you <b id="n-needs-me">0</b></button>
       <span class="chip glass" data-status="my-turn"><i></i>Your turn <b id="n-my-turn">0</b></span>
       <span class="chip glass" data-status="failed"><i></i>Failed <b id="n-failed">0</b></span>
+      <button type="button" class="chip glass" id="chip-next" title="Go to the next session calling for you: one that needs you first, then the one that has waited longest. Alt+N does it from anywhere in Mira, the terminal included." disabled>Next ▸ <b id="n-next">0</b></button>
     </nav>
     <div class="status glass">
-      <label class="hold" title="A desktop notification when a session needs you, fails or finishes a long turn, while Mira isn't in front of you. In the app, a pop-up in the middle of the screen as well."><input type="checkbox" id="notify"> Notify me</label>
+      <button type="button" class="go small" id="update-chip" aria-controls="settings" title="Mira has an update: see what's new" hidden>Update ▸ <b id="n-update">0</b></button>
       <label class="hold" title="While this tab is open and on screen, permission prompts wait here before the terminal asks."><input type="checkbox" id="hold"> Answer prompts here</label>
+      <button type="button" class="ghost small" id="settings-toggle" aria-expanded="false" aria-controls="settings">Settings</button>
       <span class="conn" id="conn" data-state="down" role="status">Connecting…</span>
     </div>
   </header>
@@ -205,6 +225,15 @@
     </div>
   </footer>
 </div>
+<section class="settings glass" id="settings" aria-label="Settings" hidden>
+  <h2 class="eyebrow">Calling for you</h2>
+  <label class="hold" title="A notification from your system when a session needs you, fails or finishes a long turn, while Mira isn't in front of you."><input type="checkbox" id="notify"> Desktop notifications</label>
+  <label class="hold" title="Mira's own card in the middle of the screen when a session calls, with its last reply and a box to answer it, wherever you are."><input type="checkbox" id="popup-on"> Pop-up in the middle of the screen</label>
+  <label class="hold" title="Flash Mira's taskbar button while you're in another window."><input type="checkbox" id="flash-on"> Flash the taskbar button</label>
+  <p class="hint">The glow on the board and the red badge stay either way.</p>
+  <h2 class="eyebrow">Updates</h2>
+  <div class="update" id="update" aria-live="polite"></div>
+</section>
 <script src="/vendor/phaser.js"></script>
 <script src="/markdown.js"></script>
 <script type="module" src="/sky/main.ts"></script>

@@ -2,94 +2,241 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file:; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file:; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline' file:">
 <title>Mira</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;600&display=swap">
 <style>
-  /* Mira's pop-up (decision 55), in the page's colours: a card for each session calling for me. */
+  /* Mira's pop-up (decisions 55 and 57), in the page's colours: a card for each session calling for me. */
   :root {
     --void: #0b0d1a; --hull: #151a2e; --hull-edge: #2c3358; --hull-shine: rgba(255, 255, 255, 0.05);
-    --ink: #ece8d9; --dim: #9c9dbb; --working: #7bd389; --beacon: #ff8a3d; --turn: #6fb6ff; --failed: #ff6b7a;
+    --ink: #ece8d9; --dim: #9c9dbb; --thronglet: #ffd34d; --working: #7bd389; --beacon: #ff8a3d; --turn: #6fb6ff; --failed: #ff6b7a;
     --font-display: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
     --font-body: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif;
+    --font-data: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
   }
-  html, body { margin: 0; background: transparent; overflow: hidden; user-select: none; }
+  html, body { margin: 0; background: transparent; overflow: hidden; }
   body { color: var(--ink); font: 14px/1.45 var(--font-body); }
   #cards { display: grid; gap: 10px; padding: 18px; }
-  .card { --c: var(--turn); position: relative; display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 14px; align-items: center; padding: 14px 40px 14px 14px; background: var(--hull); border: 2px solid var(--c); box-shadow: 0 0 0 2px var(--void), inset 0 2px 0 var(--hull-shine), 0 12px 32px rgba(0, 0, 0, 0.55); cursor: pointer; animation: arrive 0.18s ease-out; transition: opacity 0.35s, transform 0.35s; }
+  .card { --c: var(--turn); position: relative; padding: 12px 14px; background: var(--hull); border: 2px solid var(--c); box-shadow: 0 0 0 2px var(--void), inset 0 2px 0 var(--hull-shine), 0 12px 32px rgba(0, 0, 0, 0.55); animation: arrive 0.18s ease-out; }
   .card[data-status="needs-me"] { --c: var(--beacon); }
   .card[data-status="failed"] { --c: var(--failed); }
-  .card.leaving { opacity: 0; transform: translateY(-6px); }
+  .card[data-status="clash"] { --c: var(--thronglet); }
   @keyframes arrive { from { opacity: 0; transform: scale(0.96); } }
-  img { width: 52px; height: 52px; image-rendering: pixelated; }
+  /* Only one card is open at a time; the others wait as a line each, and a click opens one. */
+  .card:not(.open) { padding-block: 7px; cursor: pointer; }
+  .card:not(.open) .more, .card:not(.open) .body { display: none; }
+  .card:not(.open) img { width: 28px; height: 28px; }
+  .head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; padding-right: 30px; user-select: none; }
+  img { width: 44px; height: 44px; image-rendering: pixelated; }
   .title, .task, .body { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .title { font: 600 16px/1.3 var(--font-display); }
-  .task { margin-top: 2px; }
-  .body { margin: 1px 0 10px; color: var(--dim); font-size: 13px; }
-  .actions { display: flex; gap: 8px; }
+  .card:not(.open) .title { font-size: 14px; }
+  .task { margin-top: 1px; }
+  .body { color: var(--dim); font-size: 13px; }
+  .more { display: grid; gap: 10px; margin-top: 10px; }
+  .reply { max-height: 300px; overflow: auto; padding: 10px 12px; background: var(--void); font-size: 13.5px; line-height: 1.55; overflow-wrap: anywhere; user-select: text; }
+  .cmd { margin: 0; max-height: 160px; overflow: auto; padding: 8px 10px; background: var(--void); font: 12px/1.5 var(--font-data); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+  .files { margin: 0; padding: 8px 10px 8px 28px; background: var(--void); font: 12px/1.6 var(--font-data); overflow-wrap: anywhere; user-select: text; }
+  [hidden] { display: none !important; }
+  form { display: grid; gap: 8px; }
+  textarea { box-sizing: border-box; width: 100%; min-height: 38px; max-height: 160px; resize: none; padding: 8px 10px; background: var(--void); color: var(--ink); border: 2px solid var(--hull-edge); font: 13.5px/1.45 var(--font-body); }
+  textarea:focus { outline: none; border-color: var(--c); }
+  textarea::placeholder { color: var(--dim); }
+  .line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .gap { flex: 1; }
+  .sends { display: flex; gap: 8px; margin-left: auto; }
   button { padding: 4px 12px; border: 2px solid var(--hull-edge); background: transparent; color: var(--dim); font: 500 13px var(--font-display); cursor: pointer; }
-  button:hover { color: var(--ink); border-color: var(--dim); }
-  .open { background: var(--working); border-color: var(--working); color: var(--void); }
-  .open:hover { color: var(--void); border-color: var(--ink); }
-  .close { position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; padding: 0; border-color: transparent; font-size: 16px; line-height: 1; }
-  @media (prefers-reduced-motion: reduce) { .card { animation: none; transition: none; } }
+  button:hover:not(:disabled) { color: var(--ink); border-color: var(--dim); }
+  button:disabled, textarea:disabled { opacity: 0.55; cursor: default; }
+  .go { background: var(--working); border-color: var(--working); color: var(--void); }
+  .go:hover:not(:disabled) { color: var(--void); border-color: var(--ink); }
+  .stop { border-color: var(--failed); color: var(--failed); }
+  .quick { border-style: dashed; }
+  .close { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0; border-color: transparent; font-size: 16px; line-height: 1; }
+  .said { margin: 0; color: var(--dim); font-size: 12.5px; }
+  .how { margin: 0; color: var(--dim); font-size: 12px; line-height: 1.4; }
+  .said.bad { color: var(--failed); }
+  /* Replies in Markdown, as the story shows them. */
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
+  .md p, .md ul, .md ol, .md blockquote, .md pre, .md .md-table, .md hr { margin: 0 0 8px; }
+  .md ul, .md ol { padding-left: 22px; }
+  .md li + li { margin-top: 3px; }
+  .md .md-h { margin: 12px 0 6px; font: 600 14px var(--font-body); }
+  .md strong { font-weight: 600; }
+  .md code { padding: 1px 5px; background: var(--hull); font: 12px var(--font-data); }
+  .md pre { padding: 8px 10px; background: var(--hull); overflow-x: auto; font: 12px/1.5 var(--font-data); white-space: pre; }
+  .md pre code { padding: 0; background: none; }
+  .md blockquote { padding-left: 10px; border-left: 3px solid var(--hull-edge); color: var(--dim); }
+  .md .md-table { overflow-x: auto; }
+  .md table { border-collapse: collapse; font-size: 12.5px; }
+  .md th, .md td { padding: 4px 8px; border: 1px solid var(--hull-edge); text-align: left; vertical-align: top; }
+  .md a, .md .md-ref { color: var(--turn); }
+  .md .md-ref { font: 12px var(--font-data); }
+  .md hr { border: 0; border-top: 1px solid var(--hull-edge); }
+  @media (prefers-reduced-motion: reduce) { .card { animation: none; } }
 </style>
+<script src="../hub/web/markdown.js"></script>
 </head>
 <body>
 <div id="cards"></div>
 <script>
-  // A "done" card fades after this long, unless the pointer is resting on it.
-  const FADE_MS = 8000;
   const list = document.getElementById('cards');
-  const shown = new Map(); // id → { el, timer }
+  const shown = new Map(); // id → { el, card }
+  let quick = [];
+  let opened = null; // the one card open now
+  const PASTE = /Mac/.test(navigator.platform) ? '⌘V' : 'Ctrl+V';
 
-  function card(c) {
+  const markdown = (text) => (globalThis.renderMarkdown ? globalThis.renderMarkdown(text) : text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`));
+  const button = (label, act, cls = '', title = '') => `<button type="button" class="${cls}" data-act="${act}"${title ? ` title="${title}"` : ''}>${label}</button>`;
+  // A card I'm in the middle of answering stays open when another arrives.
+  const working = (el) => el.contains(document.activeElement) || Boolean(el.querySelector('textarea').value.trim()) || el.classList.contains('asking');
+
+  function build(id) {
     const el = document.createElement('article');
     el.className = 'card';
-    el.innerHTML = '<img src="../hub/web/mirling.png" alt=""><div><p class="title"></p><p class="task"></p><p class="body"></p><div class="actions"><button type="button" class="open" title="Show this session in Mira">Open in Mira</button><button type="button" class="editor" title="Open this conversation in Claude Code, in its VS Code window">Open in VS Code</button></div></div><button type="button" class="close" title="Close, and mark it read" aria-label="Close">×</button>';
+    el.innerHTML = `<header class="head"><img src="../hub/web/mirling.png" alt=""><div><p class="title"></p><p class="task"></p><p class="body"></p></div></header>
+      <button type="button" class="close" data-act="dismiss" title="Close, and mark it read" aria-label="Close">×</button>
+      <div class="more">
+        <div class="reply md" hidden></div>
+        <pre class="cmd" hidden></pre>
+        <ul class="files" hidden></ul>
+        <form hidden><textarea rows="1" maxlength="20000" placeholder="Reply… Enter sends it, Shift+Enter starts a new line" aria-label="Reply"></textarea><div class="line quicks"></div><p class="how"></p></form>
+        <div class="line actions"></div>
+        <p class="said" role="status" hidden></p>
+      </div>`;
+    const form = el.querySelector('form');
+    const box = el.querySelector('textarea');
     el.addEventListener('click', (e) => {
-      const action = e.target.closest('.editor') ? 'editor' : e.target.closest('.close') ? 'dismiss' : 'open';
-      window.popup.act(action, c.id);
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (!el.classList.contains('open') && act !== 'dismiss') return open(id);
+      if (!act) return;
+      if (act === 'dismiss' || act === 'open' || act === 'editor') return window.popup.act(act, id);
+      if (act === 'quick') return ask(id, 'reply', e.target.closest('[data-text]').dataset.text);
+      if (act === 'paste') return box.value.trim() ? ask(id, 'paste', box.value.trim()) : said(el, 'Write your reply first, then paste it in VS Code.', true);
+      if (act === 'allow' || act === 'deny') return ask(id, 'answer', act);
+      if (act === 'tell') return ask(id, 'tell', 'both');
     });
-    el.addEventListener('mouseenter', () => clearTimeout(shown.get(c.id)?.timer));
-    el.addEventListener('mouseleave', () => fadeLater(c.id, FADE_MS / 2));
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (box.value.trim()) ask(id, 'reply', box.value.trim());
+    });
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    // The box grows with what I write, up to a limit.
+    box.addEventListener('input', () => {
+      box.style.height = 'auto';
+      box.style.height = `${box.scrollHeight + 4}px`;
+    });
     return el;
   }
 
-  function fadeLater(id, ms) {
-    const s = shown.get(id);
-    if (!s || s.el.dataset.status !== 'my-turn') return;
-    clearTimeout(s.timer);
-    s.timer = setTimeout(() => {
-      s.el.classList.add('leaving');
-      setTimeout(() => window.popup.act('expire', id), 350);
-    }, ms);
+  function open(id) {
+    opened = id;
+    for (const [key, s] of shown) s.el.classList.toggle('open', key === id);
+    shown.get(id)?.el.querySelector('form:not([hidden]) textarea')?.focus();
   }
 
-  window.popup.onCards((cards) => {
+  // Off to the hub through the app; the card goes once it's done, or says why not.
+  function ask(id, action, value) {
+    const s = shown.get(id);
+    if (!s || s.el.classList.contains('asking')) return;
+    s.el.classList.add('asking');
+    for (const el of s.el.querySelectorAll('button:not(.close), textarea')) el.disabled = true;
+    said(s.el, action === 'reply' ? 'Sending…' : action === 'paste' ? 'Opening VS Code…' : action === 'tell' ? 'Telling them…' : 'Answering…');
+    window.popup.act(action, id, value);
+  }
+
+  function said(el, text, bad = false) {
+    const p = el.querySelector('.said');
+    p.textContent = text;
+    p.hidden = !text;
+    p.classList.toggle('bad', bad);
+  }
+
+  function update(s, c) {
+    const { el } = s;
+    const was = s.card;
+    s.card = c;
+    el.dataset.status = c.status;
+    el.querySelector('.title').textContent = c.title;
+    el.querySelector('.task').textContent = c.task ?? '';
+    el.querySelector('.task').hidden = !c.task;
+    el.querySelector('.body').textContent = c.body;
+    const reply = el.querySelector('.reply');
+    if (c.reply !== was?.reply) reply.innerHTML = c.reply ? markdown(c.reply) : '';
+    reply.hidden = !c.reply;
+    const cmd = el.querySelector('.cmd');
+    cmd.textContent = c.prompt?.summary ?? '';
+    cmd.hidden = !c.prompt?.summary;
+    const files = el.querySelector('.files');
+    files.replaceChildren(...(c.clash?.files ?? []).map((f) => Object.assign(document.createElement('li'), { textContent: f })));
+    files.hidden = !c.clash?.files.length;
+    const replying = Boolean(c.canReply) && (c.status === 'my-turn' || c.status === 'failed');
+    el.querySelector('form').hidden = !replying;
+    const make = (tag, props) => Object.assign(document.createElement(tag), props);
+    const quicks = quick.map((q) => {
+      const b = make('button', { type: 'button', className: 'quick', textContent: q, title: `Send “${q}”` });
+      Object.assign(b.dataset, { act: 'quick', text: q });
+      return b;
+    });
+    // In Mira's terminal a reply is typed in as mine. Anywhere else Send goes from Mira, which Claude
+    // weighs as another session's message, so Paste in VS Code is there for when it must be mine (decision 57).
+    const paste = make('button', { type: 'button', textContent: 'Paste in VS Code', title: `Copy the reply and open this conversation in VS Code, to paste with ${PASTE} and send yourself` });
+    paste.dataset.act = 'paste';
+    const sends = make('span', { className: 'sends' });
+    sends.append(...(c.inTerminal ? [] : [paste]), make('button', { type: 'submit', className: 'go', textContent: 'Send' }));
+    el.querySelector('.quicks').replaceChildren(...quicks, sends);
+    el.querySelector('.how').textContent = c.inTerminal
+      ? "Typed into its terminal in Mira, as if you'd typed it."
+      : `Send goes from Mira, so Claude treats it as another session's message and checks with you before anything risky. Paste in VS Code copies it and opens the conversation: ${PASTE}, then Enter.`;
+    const where = button('Open in Mira', 'open', replying ? '' : 'go', 'Show this session in Mira') + button('Open in VS Code', 'editor', '', 'Open this conversation in Claude Code, in its VS Code window');
+    el.querySelector('.actions').innerHTML =
+      c.status === 'needs-me' && c.prompt ? `${button('Allow', 'allow', 'go')}${button('Deny', 'deny', 'stop')}<span class="gap"></span>${button('Open in Mira', 'open')}${button('Open in VS Code', 'editor')}`
+      : c.status === 'clash' ? `${button('Tell both', 'tell', 'go', 'Send each session a heads-up naming the other and the files, through its inbox')}<span class="gap"></span>${button('Open in Mira', 'open')}`
+      : where;
+    // Something new on it: anything I was waiting on is over.
+    if (!was || was.status !== c.status || was.reply !== c.reply) {
+      el.classList.remove('asking');
+      for (const b of el.querySelectorAll('button, textarea')) b.disabled = false;
+      said(el, '');
+    }
+    if (el.classList.contains('asking')) for (const b of el.querySelectorAll('button:not(.close), textarea')) b.disabled = true;
+  }
+
+  window.popup.onCards((cards, q) => {
+    quick = Array.isArray(q) ? q : [];
     for (const [id, s] of shown) {
       if (cards.some((c) => c.id === id)) continue;
-      clearTimeout(s.timer);
       s.el.remove();
       shown.delete(id);
     }
+    const fresh = new Set();
     for (const c of cards) {
       let s = shown.get(c.id);
-      const fresh = !s || s.el.dataset.status !== c.status;
-      if (!s) shown.set(c.id, (s = { el: card(c), timer: 0 }));
-      s.el.dataset.status = c.status;
-      s.el.querySelector('.title').textContent = c.title;
-      s.el.querySelector('.task').textContent = c.task ?? '';
-      s.el.querySelector('.task').hidden = !c.task;
-      s.el.querySelector('.body').textContent = c.body;
+      if (!s) shown.set(c.id, (s = { el: build(c.id), card: null }));
+      if (!s.card || s.card.status !== c.status || s.card.reply !== c.reply) fresh.add(c.id);
+      update(s, c);
       list.append(s.el); // in the order sent, newest first
-      if (fresh) {
-        s.el.classList.remove('leaving');
-        clearTimeout(s.timer);
-        fadeLater(c.id, FADE_MS);
-      }
     }
+    // The newest opens, unless I'm in the middle of another.
+    const current = opened ? shown.get(opened) : undefined;
+    const newest = cards[0]?.id ?? null;
+    if (!current || (newest && fresh.has(newest) && !working(current.el))) opened = newest;
+    for (const [id, s] of shown) s.el.classList.toggle('open', id === opened);
     report();
+  });
+
+  window.popup.onSaid((id, text) => {
+    const s = shown.get(id);
+    if (!s) return;
+    s.el.classList.remove('asking');
+    for (const b of s.el.querySelectorAll('button, textarea')) b.disabled = false;
+    said(s.el, text, true);
   });
 
   // How tall the cards are, so the window fits them; again whenever that changes, as when the fonts arrive.

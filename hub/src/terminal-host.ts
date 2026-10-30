@@ -2,7 +2,7 @@
 // (decision 36), so they carry on while the hub restarts or crashes. The hub starts it when a page
 // first opens a terminal and relays each page to it; it ends once nothing has run in it and nobody
 // has watched for a minute, or when `npm run hub:stop` asks. What I type goes straight to the
-// program; Mira never types anything itself.
+// program, in the page's terminal or as a reply from Mira's pop-up; Mira never types anything of its own.
 
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -23,6 +23,7 @@ interface Running {
 
 const REPLAY_CHARS = 200_000;
 const IDLE_MS = 60_000;
+const ENTER_AFTER_MS = 250;
 const clampSize = (n: unknown, fallback: number) => (typeof n === 'number' && Number.isFinite(n) ? Math.max(10, Math.min(500, Math.round(n))) : fallback);
 
 export class TerminalHost {
@@ -98,6 +99,9 @@ export class TerminalHost {
             this.close();
             this.#onExit();
           });
+        } else if (message.type === 'type' && typeof message.id === 'string' && typeof message.text === 'string') {
+          send({ type: 'typed', ok: this.#type(message.id, message.text) });
+          socket.end();
         } else if (message.type === 'attach' && typeof message.id === 'string') {
           attached = message.id;
           spec = message.spec;
@@ -141,6 +145,17 @@ export class TerminalHost {
       this.#tell(next, { type: 'state', running: true, title: next.title, exitCode: null });
     } else if (message.type === 'stop' && t?.exitCode === null) t.process.kill();
     return size;
+  }
+
+  // A reply I wrote in Mira's pop-up or story (decision 57), typed in as I'd type it. Enter follows a
+  // moment later, so the program takes every line as one message instead of sending the first.
+  #type(id: string, text: string): boolean {
+    const t = this.#by.get(id);
+    const typed = text.replace(/\t/g, '    ').replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/g, '');
+    if (!t || t.exitCode !== null || !typed.trim()) return false;
+    t.process.write(typed);
+    setTimeout(() => { if (t.exitCode === null) t.process.write('\r'); }, ENTER_AFTER_MS).unref();
+    return true;
   }
 
   #start(id: string, spec: TerminalSpec, size: { cols: number; rows: number }): Running {

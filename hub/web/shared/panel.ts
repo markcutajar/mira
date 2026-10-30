@@ -35,6 +35,7 @@ const STATE: Record<string, string> = { running: 'Running', quiet: 'Quiet', inte
 const QUIET_MS = 30 * 60 * 1000;
 const quiet = (iso?: string) => Boolean(iso) && Date.now() - Date.parse(iso as string) > QUIET_MS;
 const markdown = () => (globalThis as { renderMarkdown?: (text: string) => string }).renderMarkdown;
+const PASTE = /Mac/.test(navigator.platform) ? '⌘V' : 'Ctrl+V';
 
 interface EditorTarget {
   link: string;
@@ -66,7 +67,7 @@ export function createPanel(options: PanelOptions): Panel {
     <div class="turns" data-turns></div>
     <form class="composer" data-composer hidden>
       <textarea data-message rows="1" maxlength="20000" placeholder="Message this session…" aria-label="Message this session"></textarea>
-      <button type="submit" class="go small" data-send>Send</button>
+      <div class="composer-go"><a class="ghost small" data-paste hidden>Paste in VS Code</a><button type="submit" class="go small" data-send>Send</button></div>
       <p class="hint" data-said role="status"></p>
     </form>
     <div class="term-view" data-term hidden>
@@ -251,7 +252,11 @@ export function createPanel(options: PanelOptions): Panel {
       if (res.ok) {
         drafts.delete(id);
         if (state.id === id) message.value = '';
-        state.said = 'Sent. It shows in the session as a message from Mira, and the reply comes in here.';
+        // At its prompt in Mira's terminal, it was typed in there as mine (decision 57).
+        const via = ((await res.json().catch(() => ({}))) as { via?: string }).via;
+        state.said = via === 'terminal'
+          ? "Typed into its terminal here, as if you'd typed it. The reply comes in here."
+          : "Sent from Mira. Claude treats it as another session's message, so it checks with you before anything risky. The reply comes in here.";
         window.setTimeout(() => { if (state.id === id) void load('first'); }, 1500);
       } else {
         state.said = (await res.text()) || `The hub couldn't send it (${res.status}).`;
@@ -270,15 +275,45 @@ export function createPanel(options: PanelOptions): Panel {
     message.style.height = `${message.scrollHeight + 4}px`;
   }
 
+  // In Mira's terminal, a message is typed in as mine; anywhere else it goes from Mira, which Claude
+  // weighs as another session's, so Paste in VS Code is there for when it must be mine (decision 57).
   function renderComposer(session: BoardSession | undefined) {
     const live = Boolean(session?.status && session.status !== 'ended');
-    const can = Boolean(session?.canMessage);
+    const typed = state.terminal.running;
+    const can = Boolean(session?.canMessage) || typed;
     $('composer').hidden = !live || Boolean(state.helper) || state.view !== 'story';
     message.disabled = !can;
     ($('send') as HTMLButtonElement).disabled = !can || state.sending;
-    $('said').textContent = state.said || (can
-      ? 'Enter sends it, Shift+Enter starts a new line. It reaches the session wherever it runs, VS Code included.'
-      : "Mira can message this session once Claude Code's hooks pass on its inbox: see hub/README.md.");
+    const paste = $('paste') as HTMLAnchorElement;
+    paste.hidden = typed || !state.editor;
+    if (state.editor) {
+      paste.href = state.editor.link;
+      paste.title = `Copy the message and open this conversation in VS Code, in ${state.editor.name}, to paste with ${PASTE} and send yourself`;
+    }
+    $('said').textContent = state.said || (typed
+      ? "Enter sends it, typed into its terminal here as if you'd typed it, while it sits at its prompt. Shift+Enter starts a new line."
+      : can
+        ? `Enter sends it from Mira, wherever the session runs, so Claude treats it as another session's message and checks with you before anything risky.${paste.hidden ? '' : ` Paste in VS Code copies it and opens the conversation: ${PASTE}, then Enter.`}`
+        : "Mira can message this session once Claude Code's hooks pass on its inbox: see hub/README.md.");
+  }
+
+  // Claude Code won't type into a conversation open in VS Code, so the message goes on the clipboard,
+  // and the link, as Continue in VS Code's, brings the conversation forward.
+  function pasteInEditor(e: Event) {
+    const id = state.id;
+    const text = message.value.trim();
+    if (!id || !text) {
+      e.preventDefault();
+      state.said = 'Write your message first, then paste it in VS Code.';
+      return refresh();
+    }
+    void navigator.clipboard.writeText(text).catch(() => toast("Mira couldn't copy it, so copy it yourself before you go."));
+    continueInEditor();
+    drafts.delete(id);
+    message.value = '';
+    fit();
+    state.said = `Copied. In VS Code, press ${PASTE}, then Enter.`;
+    refresh();
   }
 
   // At most one refresh every couple of seconds while the session is busy.
@@ -435,6 +470,7 @@ export function createPanel(options: PanelOptions): Panel {
     const session = state.id ? options.session(state.id) : undefined;
     if (session && target.closest('[data-rename]')) return void renameThing('session', session.id, sessionLabel(session));
     if (session && target.closest('[data-remove]')) return void removeThing('session', session.id, sessionLabel(session)).then((done) => { if (done) close(); });
+    if (target.closest('[data-paste]')) return pasteInEditor(e);
     if (target.closest('[data-editor]')) return continueInEditor();
     if (target.closest('[data-terminal]')) return void showTerminal(state.view !== 'terminal');
     if (target.closest('[data-term-start]')) return state.term?.view?.start();

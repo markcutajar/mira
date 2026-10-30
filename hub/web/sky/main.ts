@@ -9,6 +9,7 @@ import { createPanel, linkedSession } from '../shared/panel.ts';
 import { drawnArt } from './drawn-art.ts';
 import { createPalette } from './palette.ts';
 import { SkyScene } from './scene.ts';
+import { createSettings } from './settings.ts';
 import { createSidebar } from './sidebar.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -80,6 +81,9 @@ const panel = createPanel({
 });
 
 // The live link only calls back once data arrives, by which time the side panel below exists.
+// Settings (decisions 59 and 60): how Mira calls for me, and its own updates.
+const settings = createSettings({ panel: $('settings'), toggle: $<HTMLButtonElement>('settings-toggle'), chip: $<HTMLButtonElement>('update-chip'), count: $('n-update'), box: $('update') });
+
 const live = connectLive({
   hold: $<HTMLInputElement>('hold'),
   onConnection: renderConnection,
@@ -88,6 +92,7 @@ const live = connectLive({
   onSessions: () => { syncScene(); renderCounts(); sidebar.render(); panel.refresh(); notifier.check(); read(panel.current()); },
   onPending: () => { renderCounts(); sidebar.render(); panel.refresh(); notifier.check(); },
   onLayouts: () => scene.setLayouts(live.layouts),
+  onUpdate: () => settings.update(live.update),
   onEvent: (event) => { scene.event(event); panel.event(event); },
   onEvents: renderEvents,
 });
@@ -118,8 +123,11 @@ window.addEventListener('focus', () => read(panel.current()));
 // A session that needs me, fails or finishes a long turn while I'm elsewhere says so (decision 45).
 const notifier = createNotifier({
   toggle: $<HTMLInputElement>('notify'),
+  popup: $<HTMLInputElement>('popup-on'),
+  flash: $<HTMLInputElement>('flash-on'),
   sessions: () => live.sessions,
   pending: () => live.pending,
+  current: () => panel.current(),
   label: (s) => (s.name ? `${s.name} · ${sessionLabel(s)}` : sessionLabel(s)),
   project: (system) => projectLabel(system, live.systems),
   onOpen: (id) => {
@@ -157,7 +165,29 @@ function renderCounts() {
   // on its taskbar button (decision 55).
   const unread = live.sessions.filter((s) => s.unread).length;
   document.title = unread ? `(${unread}) Mira` : 'Mira';
+  $('n-next').textContent = String(unread);
+  const next = $<HTMLButtonElement>('chip-next');
+  next.disabled = unread === 0;
+  next.classList.toggle('on', unread > 0);
 }
+
+// The next session calling for me (decision 57): one needing me first, since it's stuck until I
+// answer, then the one that has waited longest. Opening it reads it, so the next press moves on.
+function nextCalling() {
+  const order = (s: (typeof live.sessions)[number]) => (s.status === 'needs-me' ? 0 : 1);
+  const next = live.sessions.filter((s) => s.unread && s.id !== panel.current()).sort((a, b) => order(a) - order(b) || (a.calledAt ?? '').localeCompare(b.calledAt ?? ''))[0];
+  if (!next) return toast('Nothing is waiting for you.');
+  panel.open(next.id);
+  scene.focusSession(next.id);
+}
+$('chip-next').addEventListener('click', nextCalling);
+// Alt+N, wherever the keyboard is, the terminal included, which never sees it.
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyN' || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return;
+  e.preventDefault();
+  e.stopPropagation();
+  nextCalling();
+}, true);
 
 function renderEvents() {
   // Token reports arrive after every turn and would crowd out what's happening.

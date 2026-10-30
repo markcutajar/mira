@@ -6,10 +6,10 @@ import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, session, shell, type IpcMainEvent, type Rectangle } from 'electron';
-import { loadConfig } from '../hub/src/config.ts';
+import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent, type Rectangle } from 'electron';
+import { loadConfig, QUICK_REPLIES } from '../hub/src/config.ts';
 import { badgePng } from './badge.ts';
-import { asCard, createPopup } from './popup.ts';
+import { asCard, createPopup, type PopupCard } from './popup.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = dirname(HERE);
@@ -20,12 +20,24 @@ const VOID = '#0b0d1a';
 const ALLOWED = new Set(['clipboard-read', 'clipboard-sanitized-write', 'fullscreen', 'notifications']);
 
 let port = 4711;
+let quick = QUICK_REPLIES;
 try {
-  port = loadConfig().port;
+  ({ port, quickReplies: quick } = loadConfig());
 } catch {
   // A config the hub can't read: it says why when it starts.
 }
 const HUB = `http://127.0.0.1:${port}`;
+
+/** Sends the hub something on the pop-up's behalf (decision 57); resolves to why it failed, or null. */
+async function toHub(path: string, body: unknown, gone: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${HUB}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) });
+    if (res.ok) return null;
+    return res.status === 404 ? gone : (await res.text()) || `The hub couldn't do that (${res.status}).`;
+  } catch {
+    return "Mira's hub isn't answering.";
+  }
+}
 
 async function answering(): Promise<boolean> {
   try {
@@ -150,38 +162,71 @@ function createWindow(): BrowserWindow {
     win.focus();
     win.setAlwaysOnTop(false);
   };
-  const fromPage = (event: IpcMainEvent) => event.sender === win.webContents;
+  const fromPage = (event: IpcMainEvent | IpcMainInvokeEvent) => event.sender === win.webContents;
   for (const channel of ['mira:focus', 'mira:flash', 'mira:popup', 'mira:unpop']) ipcMain.removeAllListeners(channel);
+  ipcMain.removeHandler('mira:update');
   ipcMain.on('mira:focus', (event) => { if (fromPage(event)) forward(); });
-  // When a session calls for me while I'm elsewhere, the page flashes the taskbar button and puts up
-  // Mira's pop-up in the middle of the screen (decision 55); a click on the pop-up goes back to the page.
-  const tell = (action: string, id: string) => { if (!win.isDestroyed()) win.webContents.send('mira:popup-action', action, id); };
-  const popup = createPopup(HERE, win, (action, id) => {
-    if (action === 'editor') return void inEditor(id);
-    if (action === 'open') forward();
-    tell(action, id);
+  // When a session calls for me, the page flashes the taskbar button and puts up Mira's pop-up in the
+  // middle of the screen (decision 55). Its cards answer the session from where I am (decision 57):
+  // a reply, or Allow or Deny, goes to the hub from here, and the page hears what came of each card.
+  const tell = (action: string, card: PopupCard) => { if (!win.isDestroyed()) win.webContents.send('mira:popup-action', action, card.id, card.session); };
+  const after = (action: string, card: PopupCard) => (failed: string | null) => {
+    if (!failed) tell(action, card);
+    return failed;
+  };
+  const popup = createPopup(HERE, win, {
+    quick,
+    onAction: (action, card, value) => {
+      if (action === 'editor') return void inEditor(card);
+      // Claude Code won't type into a conversation that's open in VS Code, and nothing can type into
+      // a window behind others, so the reply goes on the clipboard and the conversation comes forward.
+      if (action === 'paste' && value) {
+        clipboard.writeText(value);
+        return toEditor(card).then((opened) => (opened ? after('pasted', card)(null) : "Mira can't find a VS Code window for this session. Your reply is copied, though."));
+      }
+      if (action === 'open') forward();
+      if (action === 'open' || action === 'dismiss') return void tell(action, card);
+      if (action === 'reply') {
+        return toHub(`/api/sessions/${encodeURIComponent(card.session)}/message`, { text: value }, 'That session has gone. Carry it on in Mira or VS Code.').then(after('replied', card));
+      }
+      if (action === 'answer' && card.prompt) {
+        return toHub(`/api/prompts/${encodeURIComponent(card.prompt.id)}`, { decision: value }, 'That prompt is no longer waiting for Mira. Answer it in the session.').then(after('answered', card));
+      }
+      if (action === 'tell' && card.clash) return toHub('/api/clashes/tell', { sessions: card.clash.sessions }, "Mira's hub can't tell them.").then(after('told', card));
+      return Promise.resolve("That card can't do that.");
+    },
   });
   // Open in VS Code does what the story's Continue in VS Code does: the link to its window brings
   // that window forward, then the hub opens the conversation in it. One with no VS Code window to go
   // to opens in Mira instead.
-  async function inEditor(id: string) {
-    const at = `${HUB}/api/sessions/${encodeURIComponent(id)}/editor`;
+  async function inEditor(card: PopupCard) {
+    if (await toEditor(card)) return tell('editor', card);
+    if (win.isDestroyed()) return;
+    forward();
+    tell('open', card);
+  }
+  async function toEditor(card: PopupCard): Promise<boolean> {
+    const at = `${HUB}/api/sessions/${encodeURIComponent(card.session)}/editor`;
     try {
       const res = await fetch(at, { signal: AbortSignal.timeout(3000) });
       const link = res.ok ? ((await res.json()) as { link?: unknown }).link : undefined;
-      if (typeof link === 'string' && /^vscode:/i.test(link)) {
-        await shell.openExternal(link);
-        await fetch(at, { method: 'POST', signal: AbortSignal.timeout(3000) });
-        return tell('editor', id);
-      }
+      if (typeof link !== 'string' || !/^vscode:/i.test(link)) return false;
+      await shell.openExternal(link);
+      await fetch(at, { method: 'POST', signal: AbortSignal.timeout(3000) });
+      return true;
     } catch {
-      // The hub isn't answering: the page says so.
+      return false; // the hub isn't answering
     }
-    if (win.isDestroyed()) return;
-    forward();
-    tell('open', id);
   }
   ipcMain.on('mira:flash', (event) => { if (fromPage(event) && !win.isFocused()) win.flashFrame(true); });
+  // Taking an update (decision 60): the hub hands over to its updater, which waits for the hub and
+  // this app to close, so the app closes too, and is opened again once the update is in.
+  ipcMain.handle('mira:update', async (event) => {
+    if (!fromPage(event)) return "Only Mira's page can update it.";
+    const failed = await toHub('/api/update', { app: process.pid }, "This hub doesn't update itself.");
+    if (!failed) setTimeout(() => app.quit(), 200);
+    return failed;
+  });
   ipcMain.on('mira:popup', (event, card: unknown) => {
     const valid = fromPage(event) ? asCard(card) : null;
     if (valid) popup.show(valid);

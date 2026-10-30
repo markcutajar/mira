@@ -15,10 +15,12 @@ Mira watches every Claude Code session on your machine and draws them as mirling
 - **The island.** A section per project, joined by streams and bridges, and a mirling per session acting out what it's doing: reading at the library, hammering at the workshop, thinking between tools, watching the console with an hourglass while a script or a subagent it started runs, and playing on the swings or floating in the pond while it's your turn. Workshops and libraries grow with each project's commits over the last 30 days.
 - **The story.** Every turn of a session, with its replies, tool calls and subagents, and tokens and estimated cost per turn, read from Claude Code's transcripts when you open it.
 - **Stepping in.** Answer permission prompts from Mira, send a running session a message, start a new session in VS Code with your prompt typed in, carry a session on in a terminal inside the page, or open it in VS Code.
-- **Notifications** when a session needs you, fails, or finishes a long turn, and in the app a pop-up in the middle of the screen and a red badge on its taskbar button. A session calling for you glows on the board until you read it, and you can tick any one off.
+- **Notifications** when a session needs you, fails, or finishes a long turn, and in the app a pop-up in the middle of the screen and a red badge on its taskbar button. The pop-up shows the session's last reply with a box and quick replies to answer it, or what it asks to run with Allow and Deny, so you can answer without leaving what you're in. A session calling for you glows on the board until you read it, with how long it has waited, Alt+N takes you to the next one, and you can tick any one off. Settings switch the notifications, the pop-up and the taskbar flash on or off, each on its own.
+- **Two sessions, one file.** When two live sessions edit the same file, Mira marks both and can tell each about the other before one undoes the other's work.
 - **Build mode** to make the island yours: plants, decorations, paths, ponds, boats, swings, slides and trampolines.
 - **Project groups**, so related repos share one section.
 - **A desktop app**: a window of its own to pin to the taskbar.
+- **Updates itself.** When the repo you cloned has new commits, an Update button shows what's new, and one click pulls them, installs any new packages and restarts Mira. A copy with changes or commits of your own is left for you to pull.
 
 ![A session's story open beside the island: each turn's prompt, replies and tool calls, a subagent still running, tokens and estimated cost, and a box to message the session](docs/story.png)
 

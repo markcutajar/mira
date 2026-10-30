@@ -15,6 +15,7 @@ import type { SourceAdapter } from './sources.ts';
 import { Store } from './store.ts';
 import { makePlaceResolver, makeSectionNamer } from './systems.ts';
 import { Terminals } from './terminals.ts';
+import { Updates } from './updates.ts';
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -55,6 +56,13 @@ const growth = new GrowthTracker({
   onChange: () => hub.announceSystems(),
 });
 
+// Mira's own updates (decision 60): where the copy stands against what was last fetched, at once,
+// then fetched a minute after starting and every six hours; taking one closes the hub, and the
+// updater starts it again.
+const updates = new Updates({ home: miraHome, onChange: () => hub.announceUpdate(), exit: shutDown });
+void updates.check(false);
+if (config.checkForUpdates) updates.start(6 * HOUR);
+
 const hub = createHub({
   store,
   roster,
@@ -70,6 +78,7 @@ const hub = createHub({
   growth,
   editor: vscode(),
   terminals: new Terminals({ home: miraHome }),
+  updates,
 });
 
 hub.server.on('error', (err: NodeJS.ErrnoException) => {
@@ -88,6 +97,7 @@ hub.server.listen(config.port, '127.0.0.1', () => {
 });
 
 function shutDown() {
+  updates.stop();
   hub.close();
   store.close();
   rmSync(pidFile, { force: true });

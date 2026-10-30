@@ -7,6 +7,9 @@ import { Price } from './pricing.ts';
 export const miraHome = process.env.MIRA_HOME ?? join(homedir(), '.mira');
 export const claudeProjects = process.env.CLAUDE_PROJECTS_DIR ?? join(homedir(), '.claude', 'projects');
 
+/** The pop-up's quick replies (decision 57), unless the config names its own. */
+export const QUICK_REPLIES = ['Go ahead', 'Commit', 'Commit and push'];
+
 const Config = z.object({
   port: z.number().int().min(1).max(65535).default(4711),
   /** Rename or group sections: repo folder name to section name. */
@@ -23,6 +26,10 @@ const Config = z.object({
   keepDays: z.number().int().min(0).default(90),
   /** How long a quiet session stays in view: one still working, and any other (decision 33). */
   quiet: z.object({ workingMinutes: z.number().min(1).default(60), idleHours: z.number().min(1).default(12) }).default({ workingMinutes: 60, idleHours: 12 }),
+  /** The quick replies on the app's pop-up (decision 57), one click each. */
+  quickReplies: z.array(z.string().trim().min(1).max(200)).max(6).default(QUICK_REPLIES),
+  /** Check every few hours whether the repo Mira was cloned from has new commits (decision 60). */
+  checkForUpdates: z.boolean().default(true),
   /** Override or add model prices, in US dollars per million tokens, for cost estimates. */
   prices: z.record(z.string(), Price).default({}),
 });

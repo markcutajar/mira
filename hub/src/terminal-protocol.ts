@@ -19,8 +19,10 @@ export type ToHost =
   | { type: 'attach'; id: string; spec: TerminalSpec | null; cols: number; rows: number }
   | { type: 'list' }
   | { type: 'shutdown' }
+  /** Types my reply into a session's running terminal, then Enter (decision 57). */
+  | { type: 'type'; id: string; text: string }
   | FromPage;
-export type FromHost = ToPage | { type: 'list'; running: string[] };
+export type FromHost = ToPage | { type: 'list'; running: string[] } | { type: 'typed'; ok: boolean };
 
 export const PAGE_MESSAGES = new Set<string>(['input', 'resize', 'start', 'stop']);
 

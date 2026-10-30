@@ -19,7 +19,7 @@ const config = loadConfig();
 const url = `http://127.0.0.1:${config.port}`;
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-async function answering(): Promise<boolean> {
+export async function answering(): Promise<boolean> {
   try {
     return (await fetch(`${url}/api/systems`, { signal: AbortSignal.timeout(1500) })).ok;
   } catch {

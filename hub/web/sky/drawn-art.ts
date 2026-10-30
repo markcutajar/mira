@@ -40,6 +40,7 @@ const MAPS = {
     ['bbbbbbbbb', '.oWWWWWo.', '.oWWWWWo.', '..oSSSo..', '...oSo...', '...oSo...', '...oSo...', '..oWWWo..', '.oWWSWWo.', '.oSSSSSo.', 'bbbbbbbbb'],
     ['bbbbbbbbb', '.oWWWWWo.', '.oWWWWWo.', '..oWWWo..', '...oSo...', '...oSo...', '...oSo...', '..oWSWo..', '.oSSSSSo.', '.oSSSSSo.', 'bbbbbbbbb'],
   ],
+  clash: ['....oooo', '...oYYYo', '..oYYYo.', '.oYYYo..', 'oYYYYYYo', 'ooooYYo.', '...oYo..', '..oYo...', '.oYo....', '.oo.....'],
   book: {
     a: ['oo......oo', 'oWoo..ooWo', 'oWWWooWWWo', 'oWllWWllWo', 'oWWWWWWWWo', 'oBBBBBBBBo', '.oooooooo.'],
     b: ['oo...o..oo', 'oWoooWooWo', 'oWWWoWoWWo', 'oWllWoWlWo', 'oWWWWWWWWo', 'oBBBBBBBBo', '.oooooooo.'],
@@ -413,6 +414,8 @@ export function drawnArt(): Art {
       pixelMap(names.thought(frame), rows, { o: '#2a2f45', W: '#f4f1e6', d: '#5a5f7a' });
     }
     MAPS.hourglass.forEach((rows, frame) => pixelMap(names.hourglass(frame), rows, { b: '#a8744a', o: '#2a2f45', W: '#d6e9f5', S: '#ffd34d' }));
+    pixelMap(names.clash(0), MAPS.clash, { o: '#2a2f45', Y: '#ffd34d' });
+    pixelMap(names.clash(1), MAPS.clash, { o: '#2a2f45', Y: '#fff7ec' });
   }
 
   function tree(key: string, apples: boolean) {

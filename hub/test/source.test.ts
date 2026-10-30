@@ -83,6 +83,29 @@ describe('Claude Code source', () => {
     assert.deepEqual(stop('s-22', [helper])?.detail?.waitingOn, ['subagent']);
   });
 
+  it('notes the file each edit changed, path only, and forgets a session when it ends', () => {
+    const adapter = claudeCode({ projectsDir: dir, placeFor: () => ({ system: 'mira' }), costOf: makeCostOf() });
+    const at = new Date('2026-10-29T10:00:00.000Z');
+    const cwd = join(dir, 'repo');
+    const used = (session: string, tool: string, input: Record<string, unknown>, hook = 'PostToolUse') =>
+      adapter.ingest?.({ hook_event_name: hook, session_id: session, cwd, tool_name: tool, tool_input: input, tool_response: { ok: true } }, at);
+    used('s-30', 'Edit', { file_path: join(cwd, 'a.ts'), old_string: 'secret', new_string: 'more' });
+    used('s-30', 'Write', { file_path: 'notes.md', content: 'secret' });
+    used('s-31', 'NotebookEdit', { notebook_path: join(cwd, 'b.ipynb'), new_source: 'x' });
+    // Reading, running and an edit that never happened don't count.
+    used('s-31', 'Read', { file_path: join(cwd, 'c.ts') });
+    used('s-31', 'Bash', { command: 'rm c.ts' });
+    used('s-31', 'Edit', { file_path: join(cwd, 'd.ts') }, 'PreToolUse');
+    const edits = () => (adapter.edits?.(at.getTime() - 1000) ?? []).map((e) => [e.session, e.file]);
+    assert.deepEqual(edits(), [['s-30', join(cwd, 'a.ts')], ['s-30', join(cwd, 'notes.md')], ['s-31', join(cwd, 'b.ipynb')]]);
+    assert.ok(!JSON.stringify(adapter.edits?.(0)).includes('secret'));
+    adapter.ingest?.({ hook_event_name: 'SessionEnd', session_id: 's-31', cwd, reason: 'exit' }, at);
+    assert.deepEqual(edits(), [['s-30', join(cwd, 'a.ts')], ['s-30', join(cwd, 'notes.md')]]);
+    // Older than asked for, they're let go.
+    assert.deepEqual(adapter.edits?.(at.getTime() + 1), []);
+    assert.deepEqual(edits(), []);
+  });
+
   it('links a session to the Claude Code extension, by its UUID only', () => {
     const id = '673391f2-21ec-4c16-b57b-8dadae724ac0';
     assert.deepEqual(source.continueAt?.({ ...session(transcript), id, cwd: 'C:\\code\\mira' }), { folder: 'C:\\code\\mira', link: `vscode://anthropic.claude-code/open?session=${id}` });

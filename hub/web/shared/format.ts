@@ -3,8 +3,8 @@
 import type { SessionView } from '../../src/roster.ts';
 import type { PendingPrompt } from '../../src/permissions.ts';
 
-/** A session as the hub sends it to the browser, with its mirling's name (decision 48), its title, worktree and repo in a group (decision 47) filled in, whether Mira can message it (decision 46), and whether it's calling for me with something I haven't read (decision 55). */
-export type BoardSession = SessionView & { name?: string; title?: string; worktree?: string; repo?: string; canMessage?: boolean; unread?: boolean };
+/** A session as the hub sends it to the browser, with its mirling's name (decision 48), its title, worktree and repo in a group (decision 47) filled in, whether Mira can message it (decision 46), whether it's calling for me with something I haven't read (decision 55), and the files it and another live session both edited in the last hour (decision 58). */
+export type BoardSession = SessionView & { name?: string; title?: string; worktree?: string; repo?: string; canMessage?: boolean; unread?: boolean; clashes?: Array<{ file: string; with: string }> };
 export type { PendingPrompt };
 
 const STATUS_LABEL: Record<string, string> = { 'needs-me': 'Needs you', failed: 'Failed', 'my-turn': 'Your turn', working: 'Working', waiting: 'Waiting', ended: 'Ended' };
@@ -51,6 +51,14 @@ export function ago(iso: string): string {
   if (s < 60) return `${s}s ago`;
   const m = Math.round(s / 60);
   return m < 60 ? `${m}m ago` : `${Math.round(m / 60)}h ago`;
+}
+
+/** How long something has waited: `just now`, `12 min`, `3 h`, `2 d`. */
+export function waited(iso: string): string {
+  const m = Math.floor(Math.max(0, Date.now() - Date.parse(iso)) / 60_000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min`;
+  return m < 48 * 60 ? `${Math.floor(m / 60)} h` : `${Math.floor(m / 1440)} d`;
 }
 
 let toastTimer = 0;

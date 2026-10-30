@@ -2,7 +2,7 @@
 // project with its sessions and, folded away, its earlier conversations (decision 40). A session row
 // flies to its mirling and opens its story.
 
-import { ago, answerPrompt, cost, esc, markRead, projectLabel, sessionLabel, short, statusLabel, when, type BoardSession, type PendingPrompt } from '../shared/format.ts';
+import { ago, answerPrompt, cost, esc, folder, markRead, projectLabel, sessionLabel, short, statusLabel, waited, when, type BoardSession, type PendingPrompt } from '../shared/format.ts';
 import type { Live } from '../shared/live.ts';
 import { doneWith, removeThing, renameThing } from '../shared/manage.ts';
 import { openStart } from '../shared/start.ts';
@@ -24,6 +24,9 @@ const pixels = (rows: string[]) => rows.flatMap((row, y) => [...row].map((p, x) 
 const icon = (wide: number, tall: number, body: string) => `<svg viewBox="0 0 ${wide} ${tall}" width="${wide * 1.2}" height="${tall * 1.2}" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">${body}</svg>`;
 const OPENED = icon(11, 9, pixels(['.....#.....', '...##.##...', '.##.....##.', '#.........#', '##.......##', '#.##...##.#', '#...###...#', '#.........#', '###########']));
 const TICK = icon(9, 7, pixels(['........#', '.......##', '#.....##.', '##...##..', '.##.##...', '..###....', '...#.....']));
+// Two sessions editing the same file (decision 58): a bolt, like the one over their mirlings.
+const BOLT = icon(5, 8, pixels(['..###', '.###.', '.##..', '#####', '..##.', '.##..', '.#...', '#....']));
+const CALLING = new Set(['needs-me', 'my-turn', 'failed']);
 
 export interface Sidebar {
   render(): void;
@@ -174,20 +177,35 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
 
   const pastById = (id: string) => [...earlier.values()].flatMap((f) => f.sessions).find((s) => s.id === id);
 
+  // Another live session editing the same file (decision 58): the file, and who, on the row.
+  function clashBadge(s: BoardSession): string {
+    const first = s.clashes?.[0];
+    if (!first) return '';
+    const others = [...new Set(s.clashes?.map((c) => c.with))].map((id) => live.sessions.find((x) => x.id === id)).map((x) => (x ? (x.name ?? sessionLabel(x)) : 'another session'));
+    const files = [...new Set(s.clashes?.map((c) => c.file))];
+    const title = `${others.join(' and ')} also edited ${files.join(', ')} in the last hour`;
+    return `<span class="badge clash" title="${esc(title)}">${BOLT}${esc(files.length === 1 ? folder(files[0]) : `${files.length} files`)}</span>`;
+  }
+
   function rowHTML(s: BoardSession): string {
     const status = s.status ?? 'unknown';
     const badges = [
       treeBadge(s),
       s.permissionMode && s.permissionMode !== 'default' ? `<span class="badge" data-mode="${esc(s.permissionMode)}">${esc(s.permissionMode)}</span>` : '',
     ].join('');
-    const meta = [repoOf(s), s.lastTool ? esc(s.lastTool) : '', `<span data-since="${esc(s.lastAt)}"></span>`, s.usage ? esc(cost(s.usage.costUsd)) : ''].filter(Boolean).join(' · ');
+    // One calling for me says how long it has waited (decision 57); any other, when it last did something.
+    const calling = Boolean(s.calledAt && CALLING.has(s.status ?? ''));
+    const since = calling ? '' : `<span data-since="${esc(s.lastAt)}"></span>`;
+    // A clash goes first on the line under the title, which a long title never pushes out of view.
+    const meta = [clashBadge(s), repoOf(s), s.lastTool ? esc(s.lastTool) : '', since, s.usage ? esc(cost(s.usage.costUsd)) : ''].filter(Boolean).join(' · ');
+    const waitedFor = calling ? ` · <span data-waited="${esc(s.calledAt)}" title="How long it has waited for you"></span>` : '';
     const label = esc(sessionLabel(s));
     // A session calling for me glows until I read it (decision 55): by opening it, or with its read button.
     const read = s.unread ? `<button type="button" class="ghost small row-read" data-read-session="${esc(s.id)}" title="Mark as read: it stops glowing, and stays on the board" aria-label="Mark ${label} as read">${OPENED}</button>` : '';
     return `<li class="row-item live"><button type="button" class="row${options.current() === s.id ? ' open' : ''}${s.unread ? ' unread' : ''}" data-session="${esc(s.id)}" data-status="${esc(status)}">
       <span class="dot" title="${esc(statusLabel(s))}"></span>
       <span class="row-title">${s.name ? `<span class="row-name" title="Its mirling">${esc(s.name)}</span>` : ''}${label}${badges}</span>
-      <span class="row-meta"><span class="row-status">${esc(statusLabel(s))}</span> · ${meta}</span>
+      <span class="row-meta"><span class="row-status">${esc(statusLabel(s))}${waitedFor}</span> · ${meta}</span>
     </button><span class="row-actions">
       <button type="button" class="ghost small row-rename" data-rename-session="${esc(s.id)}" title="Rename this session" aria-label="Rename ${label}">✎</button>
       ${read}
@@ -198,6 +216,7 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
   // Relative times and countdowns move every second without redrawing.
   function tick() {
     for (const el of root.querySelectorAll<HTMLElement>('[data-since]')) el.textContent = ago(el.dataset.since as string);
+    for (const el of root.querySelectorAll<HTMLElement>('[data-waited]')) el.textContent = waited(el.dataset.waited as string);
     for (const el of root.querySelectorAll<HTMLElement>('[data-asked]')) {
       const left = Math.max(0, live.waitSeconds - (Date.now() - Date.parse(el.dataset.asked as string)) / 1000);
       el.textContent = `${Math.ceil(left)}s left`;

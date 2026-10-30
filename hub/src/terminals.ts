@@ -39,6 +39,12 @@ export class Terminals {
     return (await runningTerminals(this.#home))?.includes(id) ?? false;
   }
 
+  /** Types my reply into a session's running terminal, then Enter (decision 57); false if none is running. */
+  async type(id: string, text: string): Promise<boolean> {
+    const reply = await ask(this.#home, { type: 'type', id, text });
+    return reply?.type === 'typed' && reply.ok;
+  }
+
   /** Relays a page to a session's terminal; `spec` says how to start it if it isn't running. */
   attach(id: string, page: WebSocket, spec: TerminalSpec | null, size: { cols: number; rows: number }): void {
     let link: Socket | null = null;

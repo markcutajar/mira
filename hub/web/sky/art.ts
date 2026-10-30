@@ -49,6 +49,8 @@ export const names = {
   thought: (frame: number) => `thought.${frame}`,
   /** The hourglass over a mirling waiting on work it started (decision 56), its sand running down in three frames. */
   hourglass: (frame: number) => `hourglass.${frame}`,
+  /** The bolt over a mirling whose session and another are editing the same file (decision 58), bright and dim in turn. */
+  clash: (frame: number) => `clash.${frame}`,
   /** The tile under the pointer in build mode: green where the tool can work, red where it can't. */
   cursor: (ok: boolean) => (ok ? 'cursor.ok' : 'cursor.bad'),
   creature: (palette: Palette, frame: Frame) => `creature.${palette}.${frame}`,

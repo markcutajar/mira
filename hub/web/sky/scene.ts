@@ -106,6 +106,8 @@ interface Mirling {
   act: Act | null;
   /** What it holds while it works, the bubble over it while it thinks, or the hourglass while it waits on its own work. */
   gear: { prop?: Image; thought?: Image; hourglass?: Image; swing?: { t: number } };
+  /** The bolt over its head while it and another live session are editing the same file (decision 58). */
+  clash?: Image;
   /** Where it's playing while it waits for me. */
   play: Play | null;
   /** Up on a swing, the slide or a ring, off the tiles it walks; it hops back down to `cell` before walking on. */
@@ -468,6 +470,8 @@ export class SkyScene extends Phaser.Scene {
     thought?.setTexture(names.thought(reduceMotion ? 2 : Math.floor(time / 450) % 3)).setPosition(x + 6 * A, head).setScale(thoughtScale);
     // Narrower than a thought bubble, so drawn larger to read as well.
     hourglass?.setTexture(names.hourglass(reduceMotion ? 1 : Math.floor(time / 900 + col.phase * 3) % 3)).setPosition(x + 6 * A, head).setScale(thoughtScale * 1.5);
+    // Beside its body, clear of the name tag over its head.
+    col.clash?.setTexture(names.clash(beat(400))).setPosition(x - f * 9 * A, y - A).setScale(thoughtScale * 1.3);
   }
 
   // Swing seats hang from their frames on ropes, still, or swinging with a mirling sat on them.
@@ -560,6 +564,7 @@ export class SkyScene extends Phaser.Scene {
         this.#setStatus(col, (s.status ?? null) as Status | null);
       }
       col.title = sessionLabel(s);
+      this.#setClash(col, Boolean(s.clashes?.length));
       if (col.name !== (s.name ?? '')) {
         col.name = s.name ?? '';
         col.tag.setText(col.name);
@@ -1106,6 +1111,7 @@ export class SkyScene extends Phaser.Scene {
     this.#stopActing(col);
     col.pause?.remove();
     this.#clearMarks(col);
+    this.#setClash(col, false);
     for (const h of col.helpers.values()) h.sprite.destroy();
     col.helpers.clear();
     this.tweens.killTweensOf(col.pos);
@@ -1148,6 +1154,14 @@ export class SkyScene extends Phaser.Scene {
     const pulse = { t: 0 };
     if (!reduceMotion) this.tweens.add({ targets: pulse, t: 1, duration: 1100, repeat: -1 });
     col.marks.beacon = { img, ring, pulse };
+  }
+
+  #setClash(col: Mirling, on: boolean): void {
+    if (on && !col.clash) col.clash = this.add.image(col.pos.x, col.pos.y, names.clash(0)).setOrigin(0.5, 1).setDepth(500003);
+    if (!on && col.clash) {
+      col.clash.destroy();
+      delete col.clash;
+    }
   }
 
   #addBubble(col: Mirling): void {

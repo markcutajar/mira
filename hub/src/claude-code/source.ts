@@ -4,8 +4,9 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { basename } from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 import { CONTRACT_VERSION, MiraEvent, type Actor } from '../../../contracts/src/index.ts';
+import { Edits } from '../clashes.ts';
 import type { CostOf } from '../pricing.ts';
 import type { SourceAdapter } from '../sources.ts';
 import type { Place } from '../systems.ts';
@@ -65,6 +66,17 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
     return tasks.filter((t) => t.kind === 'subagent' || (before !== undefined && !before.has(t.id))).map((t) => t.kind);
   }
 
+  // The file each edit changed, the path only and in memory, for spotting two sessions at the same
+  // file (decision 58). The hook carries the edit itself too, which is dropped here as everywhere.
+  const edits = new Edits();
+  function edited(sessionId: string, payload: HookPayload, cwd: string | undefined, at: Date): void {
+    const field = EDITORS[String(payload.tool_name)];
+    const input = payload.tool_input && typeof payload.tool_input === 'object' ? (payload.tool_input as Record<string, unknown>) : {};
+    const file = field ? input[field] : undefined;
+    if (typeof file !== 'string' || !file || file.length > 1024) return;
+    edits.note(sessionId, isAbsolute(file) || !cwd ? file : join(cwd, file), at.getTime());
+  }
+
   const helperEvents = (file: string, sessionId: string, system: string, name?: string) => {
     const helper = helperAt(file, costOf);
     const actor = compact({ kind: 'subagent' as const, id: helper.id, parent: sessionId, name: name ?? helper.name });
@@ -87,8 +99,11 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
       // Claude Code closes the inbox before SessionEnd's hook runs, so that one names none.
       const socket = headers?.['x-mira-inbox'];
       const token = headers?.['x-mira-inbox-token'];
-      if (payload.hook_event_name === 'SessionEnd') inboxes.forget(sessionId);
-      else if (SESSION_ID.test(sessionId) && socket && token) inboxes.note(sessionId, socket, token, at);
+      if (payload.hook_event_name === 'SessionEnd') {
+        inboxes.forget(sessionId);
+        edits.forget(sessionId);
+      } else if (SESSION_ID.test(sessionId) && socket && token) inboxes.note(sessionId, socket, token, at);
+      if (payload.hook_event_name === 'PostToolUse' && sessionId) edited(sessionId, payload, cwd, at);
       return normalise(payload, { at: at.toISOString(), system, waitingOn: sessionId ? waitingOn(sessionId, payload) : [] });
     },
 
@@ -162,6 +177,8 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
       return inboxes.send(session.id, text);
     },
 
+    edits: (sinceMs) => edits.since(sinceMs),
+
     // The Claude Code extension opens a session in its chat panel from this link.
     continueAt(session) {
       if (!session.cwd || !SESSION_ID.test(session.id)) return null;
@@ -190,6 +207,8 @@ export function claudeCode(options: ClaudeCodeOptions): SourceAdapter {
 }
 
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Claude Code's tools that change a file, and which of their inputs names it.
+const EDITORS: Record<string, string> = { Edit: 'file_path', MultiEdit: 'file_path', Write: 'file_path', NotebookEdit: 'notebook_path' };
 
 function usageEvent(actor: Actor, system: string, turn: Turn, ref: MiraEvent['ref']): MiraEvent | null {
   const u = turn.own;

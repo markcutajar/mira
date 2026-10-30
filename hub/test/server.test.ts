@@ -7,14 +7,15 @@ import { stableId } from '../src/claude-code/source.ts';
 import { CONTRACT_VERSION } from '../../contracts/src/index.ts';
 import { Roster } from '../src/roster.ts';
 import { createHub } from '../src/server.ts';
-import { emptyUsage, type SourceAdapter } from '../src/sources.ts';
+import { emptyUsage, type Edit, type SourceAdapter } from '../src/sources.ts';
 import { Store } from '../src/store.ts';
 import { WebSocket } from 'ws';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { TerminalHost } from '../src/terminal-host.ts';
 import { Terminals } from '../src/terminals.ts';
+import type { UpdateStatus } from '../src/update-status.ts';
 
 const WAITS = "process.stdout.write('ready'); process.stdin.on('data', (d) => { process.stdout.write('got ' + d); process.exit(0); })";
 
@@ -23,6 +24,8 @@ const given = new Map<string, string>();
 // Inboxes the hooks named (decision 46), and the messages sent into them.
 const inboxes = new Set<string>();
 const sent: Array<[string, string]> = [];
+// Files the sessions edited (decision 58).
+const edited: Edit[] = [];
 const claude: SourceAdapter = {
   id: 'claude-code',
   ingest: (payload, at, headers) => {
@@ -31,12 +34,13 @@ const claude: SourceAdapter = {
   },
   canMessage: (s) => inboxes.has(s.id),
   message: async (s, text) => (inboxes.has(s.id) ? (sent.push([s.id, text]), null) : "Mira doesn't know its inbox."),
+  edits: (since) => edited.filter((e) => e.at >= since),
   title: (s) => given.get(s.id) ?? (s.transcript ? 'Hub work' : undefined),
   rename: (s, name) => (s.transcript ? Boolean(given.set(s.id, name)) : false),
   story: (s, { helper }) => (s.transcript ? { sessionId: s.id, helperId: helper, usage: emptyUsage(), turns: [], earlier: 0 } : null),
   continueAt: (s) => (s.cwd ? { folder: s.cwd, link: `vscode://claude/open?session=${s.id}` } : null),
   // Harmless programs stand in for `claude --resume`: one says hello and ends, the other waits for me.
-  terminalFor: (s) => (s.cwd ? { file: process.execPath, args: ['-e', s.id === 's-7' ? WAITS : "process.stdout.write('hello from mira')"], cwd: process.cwd(), title: 'hello' } : null),
+  terminalFor: (s) => (s.cwd ? { file: process.execPath, args: ['-e', s.id === 's-7' || s.id === 's-type' ? WAITS : "process.stdout.write('hello from mira')"], cwd: process.cwd(), title: 'hello' } : null),
   startAt: (_folder, prompt) => ({ link: `vscode://claude/open?prompt=${prompt ?? ''}` }),
   // Earlier conversations Claude Code still keeps; s-1 is on the board, so it's left out of history.
   history: () => [
@@ -258,13 +262,98 @@ describe('hub server', () => {
     const listed = ((await (await fetch(`${base}/api/sessions`)).json()) as { sessions: Array<{ id: string; canMessage?: boolean }> }).sessions;
     assert.equal(listed.find((s) => s.id === 's-msg')?.canMessage, true);
     assert.equal(listed.find((s) => s.id === 's-quiet')?.canMessage, undefined);
-    assert.equal((await post('/api/sessions/s-msg/message', { text: '  Also check the tests\r\n ' })).status, 204);
+    const delivered = await post('/api/sessions/s-msg/message', { text: '  Also check the tests\r\n ' });
+    assert.deepEqual([delivered.status, await delivered.json()], [200, { via: 'inbox' }]);
     assert.deepEqual(sent.at(-1), ['s-msg', 'Also check the tests']);
     const refused = await post('/api/sessions/s-quiet/message', { text: 'hello' });
     assert.deepEqual([refused.status, await refused.text()], [409, "Mira doesn't know its inbox."]);
     assert.equal((await post('/api/sessions/s-msg/message', { text: '   ' })).status, 400);
     assert.equal((await post('/api/sessions/nobody/message', { text: 'hello' })).status, 404);
     assert.equal((await post('/api/sessions/s-msg/message', { text: 'hello' }, { Origin: 'https://evil.example' })).status, 403);
+  });
+
+  it("types my reply into the session's terminal in Mira while it sits at its prompt, and never while it works", async () => {
+    await post('/ingest/claude-code', { hook_event_name: 'UserPromptSubmit', session_id: 's-type', cwd: 'C:\\code\\mira', transcript_path: 'C:\\t\\s-type.jsonl' });
+    const page = await terminalPage(base, 's-type');
+    page.send({ type: 'start' });
+    await page.until(() => page.output().includes('ready'));
+    // Working, it could be asking something in there that Enter would answer, so it goes to the inbox,
+    // which Mira doesn't know for this one.
+    assert.equal((await post('/api/sessions/s-type/message', { text: 'Commit' })).status, 409);
+    assert.doesNotMatch(page.output(), /got/);
+    await post('/ingest/claude-code', { hook_event_name: 'Stop', session_id: 's-type', cwd: 'C:\\code\\mira' });
+    const typed = await post('/api/sessions/s-type/message', { text: 'Commit\r\nand push' });
+    assert.deepEqual([typed.status, await typed.json()], [200, { via: 'terminal' }]);
+    await page.until(() => page.output().includes('got Commit'));
+    page.ws.close();
+  });
+
+  it('marks two live sessions editing the same file, and tells both about the other', async () => {
+    // A hub of its own, so these sessions stay out of the other tests' projects.
+    const own = createHub({ ...options, store: new Store(':memory:'), roster: new Roster() });
+    const at = await listen(own);
+    const send = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+      fetch(`${at}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+    try {
+      const root = resolve('/code/clash');
+      const file = join(root, 'hub', 'server.ts');
+      const headers = { 'X-Mira-Inbox': `\\\\.\\pipe\\cc-msg-${'c'.repeat(32)}`, 'X-Mira-Inbox-Token': 'b'.repeat(32) };
+      for (const id of ['c-1', 'c-2', 'c-3']) await send('/ingest/claude-code', { hook_event_name: 'UserPromptSubmit', session_id: id, cwd: root }, headers);
+      const now = Date.now();
+      edited.push({ session: 'c-1', file, at: now }, { session: 'c-2', file, at: now }, { session: 'c-3', file: join(root, 'README.md'), at: now });
+      const clashesOf = async (id: string) => ((await (await fetch(`${at}/api/sessions`)).json()) as { sessions: Array<{ id: string; clashes?: unknown }> }).sessions.find((s) => s.id === id)?.clashes;
+      assert.deepEqual(await clashesOf('c-1'), [{ file: 'hub/server.ts', with: 'c-2' }]);
+      assert.deepEqual(await clashesOf('c-2'), [{ file: 'hub/server.ts', with: 'c-1' }]);
+      assert.equal(await clashesOf('c-3'), undefined);
+      const told = await send('/api/clashes/tell', { sessions: ['c-1', 'c-2'] });
+      assert.deepEqual([told.status, await told.json()], [200, { told: 2 }]);
+      const [one, two] = sent.slice(-2);
+      assert.equal(one?.[0], 'c-1');
+      assert.equal(two?.[0], 'c-2');
+      assert.match(one?.[1] ?? '', /^A heads-up from Mira: another Claude Code session .* has also edited hub\/server\.ts in the last hour\. Re-read it/);
+      assert.equal((await send('/api/clashes/tell', { sessions: ['c-1', 'c-3'] })).status, 409);
+      assert.equal((await send('/api/clashes/tell', { sessions: ['c-1'] })).status, 400);
+      // Once one of them has ended, it's over.
+      await send('/ingest/claude-code', { hook_event_name: 'SessionEnd', session_id: 'c-2', cwd: root, reason: 'exit' });
+      assert.equal(await clashesOf('c-1'), undefined);
+    } finally {
+      own.close();
+      edited.length = 0;
+    }
+  });
+
+  it('says where Mira stands against its upstream, and hands an update to the updater', async () => {
+    assert.deepEqual(await (await fetch(`${base}/api/update`)).json(), { state: 'unknown', reason: "This hub doesn't update itself." });
+    assert.equal((await post('/api/update', {})).status, 404);
+    // A stand-in for the hub's updates, so no test touches git or closes anything.
+    let status: UpdateStatus = { state: 'available', running: 'a1b2c3d', upstream: 'origin/main', behind: 1, changes: [{ hash: 'e4f5a6b', subject: 'Add settings' }] };
+    const applied: Array<number | undefined> = [];
+    const updates = {
+      status: () => status,
+      check: async () => status,
+      apply: async (app?: number) => {
+        if (status.state !== 'available') return 'Mira is up to date.';
+        applied.push(app);
+        status = { ...status, updating: true };
+        return null;
+      },
+    };
+    const own = createHub({ ...options, store: new Store(':memory:'), roster: new Roster(), updates });
+    const at = await listen(own);
+    const send = (path: string, body: unknown) => fetch(`${at}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    try {
+      assert.equal(((await (await fetch(`${at}/api/update`)).json()) as UpdateStatus).behind, 1);
+      assert.equal(((await (await send('/api/update/check', {})).json()) as UpdateStatus).state, 'available');
+      assert.equal((await send('/api/update', { app: 'me' })).status, 400);
+      const taken = await send('/api/update', { app: 4242 });
+      assert.deepEqual([taken.status, ((await taken.json()) as UpdateStatus).updating], [202, true]);
+      assert.deepEqual(applied, [4242]);
+      status = { state: 'current', running: 'e4f5a6b' };
+      const refused = await send('/api/update', {});
+      assert.deepEqual([refused.status, await refused.text()], [409, 'Mira is up to date.']);
+    } finally {
+      own.close();
+    }
   });
 
   it('starts a new session in a project, with the prompt typed in for me', async () => {

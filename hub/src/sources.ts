@@ -115,6 +115,16 @@ export interface SourceAdapter {
   canMessage?(session: SessionView): boolean;
   /** Sends a running session my message, wherever it runs; resolves to why not, or null once it's delivered. */
   message?(session: SessionView, text: string): Promise<string | null>;
+  /** The files its sessions edited since `sinceMs`, the path only and kept in memory, for spotting two sessions editing the same file (decision 58). */
+  edits?(sinceMs: number): Edit[];
+}
+
+/** A file a session edited, as its source noted it: the path only, never the change (decision 58). */
+export interface Edit {
+  session: string;
+  /** The path as the session wrote it. */
+  file: string;
+  at: number;
 }
 
 export const emptyUsage = (): UsageTotals => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 });

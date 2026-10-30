@@ -6,8 +6,10 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { isAbsolute, relative, sep } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { CONTRACT_VERSION, MiraEvent } from '../../contracts/src/index.ts';
+import { CLASH_MS, findClashes, type Clash } from './clashes.ts';
 import type { Editor, EditorTarget } from './editor.ts';
 import type { Growth } from './growth.ts';
 import { MirlingNames, type Pack } from './mirlings.ts';
@@ -17,6 +19,8 @@ import type { SourceAdapter } from './sources.ts';
 import type { Kind, Store } from './store.ts';
 import type { Place } from './systems.ts';
 import type { Terminals } from './terminals.ts';
+import type { UpdateStatus } from './update-status.ts';
+import type { Updates } from './updates.ts';
 import { emptyLayout, SectionLayout } from './layout.ts';
 import { serveWeb, webFile } from './web.ts';
 
@@ -39,6 +43,8 @@ export interface HubOptions {
   growth?: { get(system: string): Growth | undefined };
   /** The way to the terminal host (decision 38); without it no session offers a terminal. */
   terminals?: Terminals;
+  /** Mira's own updates (decision 60); without it the page says it can't tell. */
+  updates?: Pick<Updates, 'status' | 'check' | 'apply'>;
 }
 
 interface Viewer {
@@ -56,6 +62,9 @@ const HEARTBEAT_MS = 25 * 1000;
 const CHANGES_MS = 5 * 1000;
 const SYSTEMS_DAYS = 14;
 const HISTORY_PAGE = 20;
+const MAX_MESSAGE = 20_000;
+// A session sits at its prompt in these, so a reply can be typed into its terminal (decision 57).
+const AT_PROMPT = new Set(['my-turn', 'failed', 'waiting']);
 
 export function createHub(options: HubOptions) {
   const { store, roster } = options;
@@ -92,19 +101,33 @@ export function createHub(options: HubOptions) {
   // It called for me since I last read it, and what it called for still stands.
   const unread = (s: SessionView) => Boolean(s.calledAt && (s.status === 'needs-me' || s.status === 'my-turn' || s.status === 'failed') && s.calledAt > (reads[s.id] ?? ''));
 
+  // Live sessions on the board that edited the same file in the last hour (decision 58), each file
+  // shown from its session's own repo.
+  function clashesAmong(shown: SessionView[]): Map<string, Clash[]> {
+    const live = new Set(shown.filter((s) => s.status && s.status !== 'ended').map((s) => s.id));
+    const edits = options.sources.flatMap((source) => source.edits?.(Date.now() - CLASH_MS) ?? []);
+    const found = findClashes(edits, live);
+    for (const [id, clashes] of found) {
+      const root = options.placeFor(shown.find((s) => s.id === id)?.cwd).root;
+      found.set(id, clashes.slice(0, 10).map((c) => ({ ...c, file: fromRoot(root, c.file) })));
+    }
+    return found;
+  }
+
   const sessions = () => {
     const all = roster.snapshot();
     const named = mirlings.names(all.map((s) => s.id));
-    return all
-      .filter((s) => !gone('session', s.id, s.lastAt) && !gone('system', s.system, s.lastAt))
-      .map((s) => ({
-        ...s,
-        name: named.get(s.id),
-        title: names.session[s.id] ?? sources.get(s.source)?.title?.(s),
-        ...labels(s.cwd),
-        ...(sources.get(s.source)?.canMessage?.(s) ? { canMessage: true } : {}),
-        ...(unread(s) ? { unread: true } : {}),
-      }));
+    const shown = all.filter((s) => !gone('session', s.id, s.lastAt) && !gone('system', s.system, s.lastAt));
+    const clashing = clashesAmong(shown);
+    return shown.map((s) => ({
+      ...s,
+      name: named.get(s.id),
+      title: names.session[s.id] ?? sources.get(s.source)?.title?.(s),
+      ...labels(s.cwd),
+      ...(sources.get(s.source)?.canMessage?.(s) ? { canMessage: true } : {}),
+      ...(unread(s) ? { unread: true } : {}),
+      ...(clashing.has(s.id) ? { clashes: clashing.get(s.id) } : {}),
+    }));
   };
 
   // A session on the board, or an earlier one a source still keeps (decision 40), which then joins
@@ -197,7 +220,7 @@ export function createHub(options: HubOptions) {
   function stream(req: IncomingMessage, res: ServerResponse, url: URL) {
     const id = randomUUID();
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    res.write(sse('hello', { viewer: id, waitSeconds: options.permissionWaitMs / 1000 }) + sse('layouts', layouts) + sse('systems', systems()) + sse('sessions', sessions()) + sse('pending', permissions.pending()));
+    res.write(sse('hello', { viewer: id, waitSeconds: options.permissionWaitMs / 1000 }) + sse('layouts', layouts) + sse('systems', systems()) + sse('sessions', sessions()) + sse('pending', permissions.pending()) + sse('update', updateStatus()));
     viewers.set(id, { res, visible: url.searchParams.get('visible') !== '0' });
     req.on('close', () => viewers.delete(id));
   }
@@ -245,8 +268,11 @@ export function createHub(options: HubOptions) {
     res.writeHead(204).end();
   }
 
-  // POST { text } sends a running session my message, wherever it runs (decision 46). It answers once
-  // the session's inbox has it; the reply arrives as the session's events and story.
+  // POST { text } sends a running session my message, wherever it runs (decision 46), and says how:
+  // `{ via: 'terminal' }` when it was typed into Mira's own terminal, where the session sits at its
+  // prompt, just as I'd type it there (decision 57), or `{ via: 'inbox' }`. Never into a terminal
+  // that's busy or asking something, where Enter could answer it. It answers once the session has it;
+  // the reply arrives as the session's events and story.
   async function message(req: IncomingMessage, res: ServerResponse, id: string) {
     const session = sessionById(id);
     const source = session ? sources.get(session.source) : undefined;
@@ -254,10 +280,36 @@ export function createHub(options: HubOptions) {
     const body = parseObject(await readBody(req));
     const text = typeof body?.text === 'string' ? body.text.replace(/\r\n?/g, '\n').trim() : '';
     if (!text) return reply(res, 400, 'Expected { text }.');
-    const failed = await source.message(session, text);
-    if (failed) return reply(res, 409, failed);
-    res.writeHead(204).end();
+    if (text.length > MAX_MESSAGE) return reply(res, 400, `A message is up to ${MAX_MESSAGE} characters.`);
+    const typed = AT_PROMPT.has(session.status ?? '') && terminals && terminalSpec(id) && (await terminals.running(id)) && (await terminals.type(id, text));
+    if (!typed) {
+      const failed = await source.message(session, text);
+      if (failed) return reply(res, 409, failed);
+    }
+    json(res, { via: typed ? 'terminal' : 'inbox' });
     broadcast('sessions', sessions());
+  }
+
+  // POST { sessions: [one, other] } tells two sessions editing the same file about each other
+  // (decision 58), through their inboxes, as a heads-up from Mira rather than a prompt of mine.
+  async function tell(req: IncomingMessage, res: ServerResponse) {
+    const body = parseObject(await readBody(req));
+    const ids = Array.isArray(body?.sessions) ? body.sessions : [];
+    if (ids.length !== 2 || ids.some((id) => typeof id !== 'string') || ids[0] === ids[1]) return reply(res, 400, 'Expected { sessions: [one, other] }.');
+    const listed = sessions();
+    const pair = ids.map((id) => listed.find((s) => s.id === id));
+    const [one, other] = pair;
+    if (!one || !other || !one.clashes?.some((c) => c.with === other.id)) return reply(res, 409, "Those two sessions aren't editing the same file any more.");
+    const failed: string[] = [];
+    for (const [to, about] of [[one, other], [other, one]] as const) {
+      const files = [...new Set((to.clashes ?? []).filter((c) => c.with === about.id).map((c) => c.file))];
+      const source = sources.get(to.source);
+      const session = roster.get(to.id);
+      const why = source?.message && session ? await source.message(session, headsUp(about, files)) : "Mira can't message it.";
+      if (why) failed.push(`${to.name ?? to.title ?? to.id}: ${why}`);
+    }
+    if (failed.length === 2) return reply(res, 409, failed.join(' '));
+    json(res, { told: 2 - failed.length, ...(failed.length ? { failed: failed.join(' ') } : {}) });
   }
 
   // POST .../read says I've read what a session called me for, so it stops calling until it calls
@@ -377,7 +429,11 @@ export function createHub(options: HubOptions) {
     if (terminalOf) return void terminal(res, terminalOf);
     if (editorOf) return editor(req, res, editorOf);
     if (messageTo) return void message(req, res, messageTo);
+    if (route === 'POST /api/clashes/tell') return void tell(req, res);
     if (readOf) return read(res, readOf);
+    if (route === 'GET /api/update') return json(res, updateStatus());
+    if (route === 'POST /api/update/check') return void checkForUpdate(res);
+    if (route === 'POST /api/update') return void update(req, res);
     if (startOf) return void startIn(req, res, decodeName(startOf));
     if (historyOf) return history(res, decodeName(historyOf), url);
     if (route === 'GET /api/stream') return stream(req, res, url);
@@ -447,7 +503,27 @@ export function createHub(options: HubOptions) {
   /** Sends every page the project list again, for when something outside an event changes it, such as commit counts. */
   const announceSystems = () => broadcast('systems', systems());
 
-  return { server, permissions, close, announceSystems };
+  // Mira's own updates (decision 60): GET says where the copy stands, POST /check fetches and looks
+  // again, and POST takes the update, after which the hub closes and the updater starts it again.
+  // The app gives its own process, to be opened again once the update is in.
+  const updates = options.updates;
+  const updateStatus = (): UpdateStatus => updates?.status() ?? { state: 'unknown', reason: "This hub doesn't update itself." };
+  async function checkForUpdate(res: ServerResponse) {
+    if (!updates) return reply(res, 404, "This hub doesn't update itself.");
+    json(res, await updates.check());
+  }
+  async function update(req: IncomingMessage, res: ServerResponse) {
+    if (!updates) return reply(res, 404, "This hub doesn't update itself.");
+    const app = parseObject(await readBody(req))?.app;
+    if (app !== undefined && !(Number.isInteger(app) && (app as number) > 0)) return reply(res, 400, 'Expected { app }, the app\'s process, or nothing.');
+    const failed = await updates.apply(app as number | undefined);
+    if (failed) return reply(res, 409, failed);
+    res.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify(updates.status()));
+  }
+  /** Sends every page where the update stands, for when a check finishes or an update starts. */
+  const announceUpdate = () => broadcast('update', updateStatus());
+
+  return { server, permissions, close, announceSystems, announceUpdate };
 }
 
 // Hooks and curl send no Origin header; browsers do on cross-site requests, and mark every request
@@ -460,6 +536,20 @@ function fromThisMachine(req: IncomingMessage, port: number): boolean {
   if (site !== undefined && site !== 'same-origin' && site !== 'none') return false;
   const origin = req.headers.origin;
   return origin === undefined || local.some((host) => origin === `http://${host}`);
+}
+
+/** A file as its repo names it, such as `hub/src/server.ts`, or its whole path outside the repo. */
+function fromRoot(root: string | undefined, file: string): string {
+  const inside = root ? relative(root, file) : '';
+  return inside && !inside.startsWith('..') && !isAbsolute(inside) ? inside.split(sep).join('/') : file;
+}
+
+/** What Mira tells a session editing the same files as another (decision 58). */
+function headsUp(other: { name?: string; title?: string }, files: string[]): string {
+  const who = [other.name, other.title ? `“${other.title}”` : ''].filter(Boolean).join(', ');
+  const what = files.length > 1 ? `${files.slice(0, -1).join(', ')} and ${files.at(-1)}` : (files[0] ?? 'the same files');
+  const them = files.length > 1 ? 'them' : 'it';
+  return `A heads-up from Mira: another Claude Code session on this machine${who ? ` (${who})` : ''} has also edited ${what} in the last hour. Re-read ${them} before you change ${them} again, and take care not to undo that session's work.`;
 }
 
 /** When the hook fired, sent by the background command; falls back to arrival time. */
