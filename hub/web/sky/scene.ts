@@ -4,6 +4,7 @@
 
 import type { MiraEvent } from '../../../contracts/src/index.ts';
 import { actFor, READING, type ToolAct, type Trips } from '../shared/acts.ts';
+import type { Sound } from '../shared/sound.ts';
 import { sessionLabel, type BoardSession } from '../shared/format.ts';
 import { ACCENT_COLOUR, ACCENTS, MAX_LEVEL, names, WATERFALL_FRAMES, type Accent, type Art, type Decoration, type Edge, type HouseStyle, type Palette } from './art.ts';
 import { arrange, BUILDING_LABEL, destinations, edit, isItem, isPiece, ITEMS, move, movePiece, onWater, pieceAt, PIECES, placeOf, restyle, sameLayouts, unreachable, type ItemKind, type Outcome, type PieceKind, type Placed, type SectionLayout, type Tool, type Where } from './build.ts';
@@ -146,7 +147,11 @@ export interface SkyOptions {
   now?(): Date;
   /** The camera started or stopped following the open mirling (decision 65). */
   onFollow?(on: boolean): void;
+  /** Something on screen made a sound, panned from -1 at the left to 1 at the right (decision 69). */
+  onSound?: Sound['island'];
 }
+
+type IslandSound = Parameters<Sound['island']>[0];
 
 /** A tile of the island as build mode sees it: whose layout it's in, and where. */
 interface Target {
@@ -503,6 +508,7 @@ export class SkyScene extends Phaser.Scene {
       season: () => this.#season,
       inSky: (obj) => this.#inSky(obj),
       overIsland: (obj) => this.#overIsland(obj),
+      sound: (name, x) => this.#sound(name, x),
     });
     this.#selectMark = this.add.image(0, 0, names.select).setVisible(false);
     this.#cursor = this.add.image(0, 0, names.cursor(true)).setVisible(false);
@@ -1116,9 +1122,18 @@ export class SkyScene extends Phaser.Scene {
     }));
   }
 
+  /** A sound from a point on the island, if it's on screen, panned to where it is (decision 69). */
+  #sound(name: IslandSound, x: number): void {
+    const view = this.cameras.main.worldView;
+    const across = (x - view.x) / view.width;
+    if (across < -0.05 || across > 1.05) return;
+    this.#options.onSound?.(name, across * 2 - 1);
+  }
+
   // The hammer strikes: a spark where its head lands.
   #spark(col: Mirling): void {
     if (reduceMotion || !col.gear.prop) return;
+    this.#sound('hammer', col.pos.x);
     const spark = this.add.image(col.pos.x + col.facing * 14, col.pos.y - 3, names.prop('spark')).setDepth(col.pos.y + 0.3);
     this.tweens.add({ targets: spark, y: spark.y - 5, alpha: 0, duration: 260, onComplete: () => spark.destroy() });
   }
@@ -1212,6 +1227,7 @@ export class SkyScene extends Phaser.Scene {
     this.#hop(col, at, () => {
       if (!still()) return;
       this.#burst(at.x, at.y - this.#art.sizes.creature, 12, 'confetti');
+      this.#sound('cheer', at.x);
       this.#hop(col, at, () => {
         if (!still()) return;
         col.act = 'carry';
@@ -1253,6 +1269,7 @@ export class SkyScene extends Phaser.Scene {
     if (reduceMotion) return;
     const A = this.#art.scale;
     const rocket = this.#overIsland(this.add.image(x, y, names.confetti).setTint(0xffe08a).setScale(A).setDepth(450000));
+    this.#sound('firework', x);
     this.tweens.add({
       targets: rocket, y: y - 36 * A, duration: 650, ease: 'Quad.easeOut',
       onComplete: () => {
@@ -1281,6 +1298,7 @@ export class SkyScene extends Phaser.Scene {
     this.time.delayedCall(2500, () => {
       this.tweens.add({ targets: poles, alpha: 0, duration: 400, onComplete: () => poles.destroy() });
       this.#burst(b.x, b.top, 30, 'confetti');
+      this.#sound('levelup', b.x);
       this.#floatAt(b.x, b.top - 8 * A, `${b.type === 'workshop' ? 'Workshop' : 'Library'} up to level ${level}`, '#9be36b');
     });
   }
@@ -1315,6 +1333,7 @@ export class SkyScene extends Phaser.Scene {
         col.depth = undefined;
         col.cell = target;
         if (col.removed) return;
+        this.#sound('thud', to.x);
         if (!reduceMotion) {
           const dust = this.add.image(to.x, to.y + 1, names.dust).setOrigin(0.5, 1).setDepth(to.y + 0.5).setScale(this.#art.scale / 2 + 0.5);
           this.tweens.add({ targets: dust, alpha: 0, scaleX: dust.scaleX * 1.6, duration: 450, onComplete: () => dust.destroy() });
@@ -1353,6 +1372,7 @@ export class SkyScene extends Phaser.Scene {
     const A = this.#art.scale;
     const heart = this.#overIsland(this.add.image(col.pos.x + col.facing * 4 * A, col.pos.y - this.#art.sizes.creature - 2 * A, names.heart).setOrigin(0.5, 1).setDepth(500004).setScale(A * 0.75));
     this.tweens.add({ targets: heart, y: heart.y - 12 * A, alpha: 0, scale: A * 1.1, duration: 1100, ease: 'Sine.easeOut', onComplete: () => heart.destroy() });
+    this.#sound('boop', col.pos.x);
     if (!col.moving && !col.aloft && col !== this.#held) this.#hop(col, { x: col.pos.x, y: col.pos.y }, () => {});
   }
 

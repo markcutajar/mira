@@ -48,6 +48,7 @@
   .settings .eyebrow:first-child { margin-top: 0; }
   .settings .hold { color: var(--ink); }
   .settings .hold:has(input:disabled) { color: var(--dim); cursor: default; }
+  .settings .volume input { flex: 1; accent-color: var(--thronglet); }
   .update { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
   .update p { margin: 0; }
   .update code { font-family: var(--font-data); font-size: 12px; color: var(--dim); }
@@ -252,6 +253,10 @@
   <label class="hold" title="Dawn, dusk and night by your clock, with lamps lit and mirlings asleep at bedtime, and the seasons by your calendar. Off, it's always a summer's day."><input type="checkbox" id="clock-on" checked> Night and the seasons follow the clock</label>
   <label class="hold" title="After three minutes without your touching Mira, with no story open, the camera drifts from one busy mirling to the next until you're back."><input type="checkbox" id="tour-on"> Tour the island while I'm away</label>
   <label class="hold" title="Draw the island 20 times a second, not 60, while you're in another window, so it costs a third as much."><input type="checkbox" id="calm-on"> Slow it down while Mira isn't in front</label>
+  <h2 class="eyebrow">Sound</h2>
+  <label class="hold" title="A soft chime when a session needs you, fails or finishes a long turn, wherever you are, except for the session you have open in front of you."><input type="checkbox" id="chime-on"> A chime when a session calls</label>
+  <label class="hold" title="Hammers tapping, fish splashing, gulls, fireworks and cheers, for what's on screen."><input type="checkbox" id="sounds-on"> Sounds on the island</label>
+  <label class="hold volume">Volume <input type="range" id="volume" min="0" max="100" step="5" value="50"></label>
   <h2 class="eyebrow">What Mira costs</h2>
   <div class="footprint" id="footprint" aria-live="off"></div>
   <h2 class="eyebrow">Updates</h2>

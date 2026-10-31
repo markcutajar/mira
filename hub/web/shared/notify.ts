@@ -88,6 +88,8 @@ export interface NotifierOptions {
   project(system: string): string;
   /** A notification was clicked: show its session. */
   onOpen(id: string): void;
+  /** A session started calling for me, or two started editing one file, for the chime (decision 69). */
+  onCall?(status: Worth | 'clash'): void;
 }
 
 export interface Notifier {
@@ -270,6 +272,8 @@ export function createNotifier(options: NotifierOptions): Notifier {
   async function fire(id: string, status: Worth): Promise<void> {
     const s = options.sessions().find((x) => x.id === id);
     if (!s || s.status !== status || !s.unread) return;
+    // The chime, when it's on, for any session but the one I'm looking at (decision 69).
+    if (!(inFront() && options.current() === id)) options.onCall?.(status);
     const say = speaks(id);
     if (!say) return;
     forget(id);
@@ -302,6 +306,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
   function fireClash(key: string): void {
     const pair = pairs(options.sessions()).get(key);
     if (!pair || shown.has(key)) return;
+    options.onCall?.('clash');
     const say = speaks();
     if (!say) return;
     shown.set(key, { status: 'clash' });

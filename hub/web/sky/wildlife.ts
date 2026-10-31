@@ -21,6 +21,8 @@ export interface WildHost {
   season(): Season;
   inSky<T extends Phaser.GameObjects.GameObject>(obj: T): T;
   overIsland<T extends Phaser.GameObjects.GameObject>(obj: T): T;
+  /** A sound from a point on the island, if it's on screen (decision 69). */
+  sound(name: 'splash' | 'birds', x: number): void;
 }
 
 interface Flier {
@@ -145,6 +147,8 @@ export class Wildlife {
     const y = fit.y + rand(0.05, 0.45) * fit.h;
     const count = 3 + Math.floor(Math.random() * 3);
     const duration = ((fit.w + 60 * A) / (45 * A)) * 1000;
+    // They call as they cross the middle of the island.
+    scene.time.delayedCall(duration / 2, () => this.#host.sound('birds', fit.x + fit.w / 2));
     for (let i = 0; i < count; i++) {
       const back = Math.ceil(i / 2) * 9 * A;
       const side = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 6 * A;
@@ -171,6 +175,7 @@ export class Wildlife {
     const fish = scene.add.image(from.x, from.y, names.fish).setDepth(from.y + 1).setFlipX(way < 0).setScale(A / 2 + 0.5);
     const t = { k: 0 };
     this.#splash(from);
+    this.#host.sound('splash', from.x);
     scene.tweens.add({
       targets: t, k: 1, duration: 650, ease: 'Linear',
       onUpdate: () => fish.setPosition(from.x + way * 8 * A * t.k, from.y - Math.sin(Math.PI * t.k) * 9 * A).setRotation(way * (t.k - 0.5) * 1.4),

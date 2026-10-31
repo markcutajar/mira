@@ -6,6 +6,7 @@ import { clock, esc, markRead, projectLabel, sessionLabel, toast } from '../shar
 import { LANDMARKS, type Landmark, type Unlocks } from '../shared/landmarks.ts';
 import { connectLive } from '../shared/live.ts';
 import { createNotifier } from '../shared/notify.ts';
+import { createSound } from '../shared/sound.ts';
 import { createPanel, linkedSession } from '../shared/panel.ts';
 import { drawnArt } from './drawn-art.ts';
 import { createFootprint } from './footprint.ts';
@@ -44,8 +45,12 @@ clockOn.addEventListener('change', () => {
 });
 const summerDay = () => new Date(new Date().getFullYear(), 6, 15, 12);
 
+// Sound (decision 69): a chime when a session calls, and the island's own, each off until switched on.
+const sound = createSound({ chime: $<HTMLInputElement>('chime-on'), island: $<HTMLInputElement>('sounds-on'), volume: $<HTMLInputElement>('volume') });
+
 const scene = new SkyScene({
   art: drawnArt(),
+  onSound: (name, pan) => sound.island(name, pan),
   now: () => (clockOn.checked ? new Date(Date.now() + skew) : summerDay()),
   insets: () => ({
     top: $('hud-top').getBoundingClientRect().bottom + 8,
@@ -211,6 +216,7 @@ const notifier = createNotifier({
     panel.open(id);
     scene.focusSession(id);
   },
+  onCall: (status) => sound.chime(status),
 });
 
 function syncScene() {
