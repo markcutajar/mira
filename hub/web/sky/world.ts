@@ -26,6 +26,8 @@ export interface Cell extends Spot {
   span?: 'c' | 'r';
   /** A plant or decoration placed in build mode (decisions 39 and 44). */
   item?: string;
+  /** An animal that calls this tile home (decision 71); the tile stays open to walk on. */
+  animal?: string;
   /** The section whose layout changed this tile, if one did. */
   by?: number;
 }

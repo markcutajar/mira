@@ -9,6 +9,10 @@ import type { Season } from './daylight.ts';
 import type { Palette } from './mirling.ts';
 import type { HouseStyle } from './world.ts';
 
+/** Animals that live on the island (decision 71), each in a few coats, in poses: two walking frames, sitting, asleep and, for a capybara, bathing. */
+export type Animal = 'dog' | 'cat' | 'capybara';
+export type AnimalPose = 'a' | 'b' | 'sit' | 'sleep' | 'swim';
+
 /** Label colours, one per section in turn. */
 export type Accent = 'y' | 'l' | 'o' | 'c' | 'p' | 'g';
 export const ACCENTS: Accent[] = ['y', 'c', 'l', 'o', 'p', 'g'];
@@ -88,6 +92,8 @@ export const names = {
   sails: 'sails',
   /** A scrap of confetti, or a spark of a firework, drawn white for the scene to colour (decision 64). */
   confetti: 'confetti',
+  /** An animal in one of its coats, in a pose, facing right (decision 71). */
+  animal: (kind: Animal, coat: number, pose: AnimalPose) => `animal.${kind}.${coat}.${pose}`,
   /** The heart over a mirling I pet (decision 65), and the puff of dust where one I dropped lands. */
   heart: 'heart',
   dust: 'dust',
@@ -125,6 +131,8 @@ export interface Art {
   readonly playground: { swings: { pivots: Point[]; rope: number }; slide: { ladder: Point; top: Point; foot: Point }; trampoline: { spots: Point[] } };
   /** Where light shines from at night, from the ground point of a lamp, a campfire, a house, a jack-o'-lantern, a workshop, a library, a lighthouse and an observatory. */
   readonly lights: Record<'lamp' | 'campfire' | 'house' | 'pumpkin' | 'workshop' | 'library' | 'lighthouse' | 'observatory', Point>;
+  /** How many coats each animal comes in (decision 71). */
+  readonly animalCoats: Record<Animal, number>;
   /** Where a windmill's sails turn, from its ground point, with the landmark at the buildings' scale (decision 68). */
   readonly sailsAt: Point;
   /** Starts loading any files, for art that comes from a pack. */

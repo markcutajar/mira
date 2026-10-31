@@ -85,6 +85,23 @@ describe('build mode', () => {
     assert.deepEqual(free.map((cell) => [cell.item, cell.walk]), kinds.map((kind) => [kind, false]));
   });
 
+  it('gives animals a home that stays open to walk on, and keeps it theirs (decision 71)', () => {
+    const cells = generateCells(['code']);
+    const [home, other] = [...cells.values()].filter((cell) => cell.section === 0 && cell.walk && cell.ch === 'g' && cell.c > c0 && cell.r > r0 && cell.c < c0 + SEC - 1 && cell.r < r0 + SEC - 1);
+    const place = (cell: Cell) => `${cell.c - c0},${cell.r - r0}`;
+    const added = edit(undefined, 'capybara', home as Cell, place(home as Cell), true);
+    assert.ok('layout' in added);
+    arrange(cells, 0, 'code', added.layout);
+    assert.deepEqual([home?.animal, home?.walk], ['capybara', true]);
+    assert.deepEqual(edit(added.layout, 'dog', home as Cell, place(home as Cell), true), { refused: 'An animal already calls this tile home.' });
+    assert.deepEqual(edit(added.layout, 'bench', home as Cell, place(home as Cell), true), { refused: 'An animal calls this tile home. Remove it first.' });
+    const water = [...cells.values()].find((cell) => cell.ch === 'w') as Cell;
+    assert.ok('refused' in edit(added.layout, 'cat', water, place(water), false));
+    assert.ok('layout' in edit(added.layout, 'cat', other as Cell, place(other as Cell), true));
+    const gone = edit(added.layout, 'remove', home as Cell, place(home as Cell), true);
+    assert.deepEqual('layout' in gone && gone.layout.placed, {});
+  });
+
   it('moves buildings to free tiles, lets two swap places, and keeps a house its style', () => {
     const plain = arrange(generateCells(['code']), 0, 'code');
     const cells = generateCells(['code']);

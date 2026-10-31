@@ -3,7 +3,7 @@
 // Landmarks show what they take until they're earned (decision 68).
 
 import { esc } from '../shared/format.ts';
-import { ITEMS, PIECES, type ItemGroup, type ItemKind, type PieceKind, type Tool } from './build.ts';
+import { ANIMALS, ITEMS, PIECES, type AnimalKind, type ItemGroup, type ItemKind, type PieceKind, type Tool } from './build.ts';
 
 export interface PaletteOptions {
   /** A picture of what a tool places, if it places something. */
@@ -27,6 +27,7 @@ const GROUPS: Array<{ name: string; tools: Array<{ tool: Tool; label: string }> 
   { name: 'Decor', tools: items('Decor') },
   { name: 'Water', tools: items('Water') },
   { name: 'Landmarks', tools: items('Landmarks') },
+  { name: 'Animals', tools: (Object.keys(ANIMALS) as AnimalKind[]).map((tool) => ({ tool, label: ANIMALS[tool].label })) },
   { name: 'Play', tools: (Object.keys(PIECES) as PieceKind[]).map((tool) => ({ tool, label: PIECES[tool].label })) },
   { name: 'Ground', tools: [{ tool: 'path', label: 'Path' }, { tool: 'grass', label: 'Grass' }, { tool: 'flowers', label: 'Flowers' }, { tool: 'water', label: 'Pond' }] },
   { name: 'Arrange', tools: [{ tool: 'move', label: 'Move' }, { tool: 'restyle', label: 'Restyle' }, { tool: 'remove', label: 'Remove' }] },

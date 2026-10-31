@@ -55,12 +55,21 @@ export const PIECES: Record<PieceKind, { label: string; letter: string }> = {
   trampoline: { label: 'Trampoline', letter: 'J' },
 };
 export const isPiece = (kind: string): kind is PieceKind => kind in PIECES;
+
+/** Animals that live on the island (decision 71): placed on a tile they call home, they wander round it, and never take a tile. */
+export type AnimalKind = 'dog' | 'cat' | 'capybara';
+export const ANIMALS: Record<AnimalKind, { label: string }> = {
+  dog: { label: 'Dog' },
+  cat: { label: 'Cat' },
+  capybara: { label: 'Capybara' },
+};
+export const isAnimal = (kind: string): kind is AnimalKind => kind in ANIMALS;
 /** The play piece standing on a tile, if any. */
 export const pieceAt = (cell: Cell): PieceKind | undefined => (Object.keys(PIECES) as PieceKind[]).find((k) => PIECES[k].letter === cell.ch);
 
 export type Ground = 'path' | 'grass' | 'flowers' | 'water';
 const GROUND: Record<Ground, 'p' | 'g' | 'f' | 'w'> = { path: 'p', grass: 'g', flowers: 'f', water: 'w' };
-export type Tool = ItemKind | PieceKind | Ground | 'move' | 'restyle' | 'remove';
+export type Tool = ItemKind | PieceKind | AnimalKind | Ground | 'move' | 'restyle' | 'remove';
 export const HOUSE_STYLES: HouseStyle[] = ['brick', 'timber', 'stone'];
 const LETTER: Record<BuildingType, string> = { house: 'H', library: 'L', workshop: 'W' };
 export const BUILDING_LABEL: Record<BuildingType, string> = { house: 'house', library: 'library', workshop: 'workshop' };
@@ -148,6 +157,9 @@ export function arrange(cells: Map<string, Cell>, i: number, template: Template,
     if (!cell || cell.item) continue;
     if (isPiece(kind)) {
       if (cell.walk && LAND.includes(cell.ch)) Object.assign(mark(cell), { ch: PIECES[kind].letter, walk: false });
+    } else if (isAnimal(kind)) {
+      // An animal's home stays open ground, for it and the mirlings to walk on.
+      if (cell.walk && LAND.includes(cell.ch)) Object.assign(mark(cell), { animal: kind });
     } else if (isItem(kind) && (onWater(kind) ? cell.ch === 'w' : cell.walk && LAND.includes(cell.ch))) {
       Object.assign(mark(cell), { item: kind, walk: false });
     }
@@ -182,6 +194,14 @@ export function edit(layout: SectionLayout | undefined, tool: Exclude<Tool, 'mov
   }
   if (cell.ch === 'b') return { refused: 'Bridges stay, so the projects stay joined.' };
   if (cell.item) return { refused: 'Something is already here. Remove it first.' };
+  if (isAnimal(tool)) {
+    if (cell.ch === 'w') return { refused: 'Animals live on land. A capybara will find the water by itself.' };
+    if (cell.animal) return { refused: 'An animal already calls this tile home.' };
+    if (!cell.walk || !LAND.includes(cell.ch)) return { refused: 'That tile is taken.' };
+    return { layout: { ...next, placed: { ...next.placed, [place]: tool } } };
+  }
+  // Putting something on an animal's home would send the animal away, so it has to be taken away first.
+  if (cell.animal && (isItem(tool) || isPiece(tool))) return { refused: 'An animal calls this tile home. Remove it first.' };
   if (isItem(tool) && onWater(tool)) {
     if (cell.ch !== 'w') return { refused: tool === 'boat' ? 'A boat goes on the water.' : 'Lily pads go on the water.' };
     return { layout: { ...next, placed: { ...next.placed, [place]: tool } } };

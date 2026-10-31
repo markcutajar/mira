@@ -1,7 +1,7 @@
 // Placeholder pixel art, drawn in code at the detailed 2× size (decisions 14 and 25). Every
 // picture is registered under a name from art.ts, so an art pack can replace this module whole.
 
-import { MAX_LEVEL, names, WATERFALL_FRAMES, type Anchor, type Art, type Edge, type HouseStyle, type Palette, type Point, type Season } from './art.ts';
+import { MAX_LEVEL, names, WATERFALL_FRAMES, type Anchor, type Animal, type AnimalPose, type Art, type Edge, type HouseStyle, type Palette, type Point, type Season } from './art.ts';
 import { ASLEEP, MIRLING, PALETTES } from './mirling.ts';
 
 type Ctx = CanvasRenderingContext2D;
@@ -21,6 +21,35 @@ const C = {
 };
 
 const PAL = PALETTES;
+
+// Animals' coats (decision 71): the coat itself, its shade underneath, the outline, ears, nose and eyes.
+interface Coat {
+  coat: string;
+  shade: string;
+  dark: string;
+  ear: string;
+  nose: string;
+  eye: string;
+  tangerine?: boolean;
+}
+const COATS: Record<Animal, Coat[]> = {
+  dog: [
+    { coat: '#c8935a', shade: '#a8743f', dark: '#5a3b1f', ear: '#8a5a32', nose: '#2a1f1a', eye: '#2a1f1a' },
+    { coat: '#f4f1e6', shade: '#d6d0c0', dark: '#3a3c4a', ear: '#4a4c5a', nose: '#2a1f1a', eye: '#2a1f1a' },
+    { coat: '#6b4423', shade: '#4f311a', dark: '#2a1a10', ear: '#3a2414', nose: '#15100c', eye: '#15100c' },
+  ],
+  cat: [
+    { coat: '#e8a04a', shade: '#c47a2a', dark: '#6b3a12', ear: '#e8a04a', nose: '#ff9e9e', eye: '#3a7a2c' },
+    { coat: '#a8aab8', shade: '#80829a', dark: '#3a3c4a', ear: '#a8aab8', nose: '#ff9e9e', eye: '#ffd34d' },
+    { coat: '#3a3a44', shade: '#2a2a32', dark: '#121218', ear: '#3a3a44', nose: '#ff9e9e', eye: '#ffd34d' },
+  ],
+  capybara: [
+    { coat: '#a8744a', shade: '#8a5a32', dark: '#4a2e1c', ear: '#6b4423', nose: '#3a2414', eye: '#2a1a10' },
+    { coat: '#a8744a', shade: '#8a5a32', dark: '#4a2e1c', ear: '#6b4423', nose: '#3a2414', eye: '#2a1a10', tangerine: true },
+  ],
+};
+const ANIMAL_W = 22;
+const ANIMAL_H = 15;
 
 /** What the seasons change (decision 62): the grass and its flowers, the leaves, blossom in spring and snow in winter. */
 interface Dress {
@@ -824,6 +853,78 @@ export function drawnArt(): Art {
     }
   }
 
+  // Animals (decision 71), each drawn from a few simple shapes, the last on top, with an outline round
+  // them all: two walking frames, sitting, asleep and, for a capybara, bathing up to its back.
+  type Shape = { inside(x: number, y: number): boolean; fill: string; shade?: string; below?: number };
+  const oval = (cx: number, cy: number, rx: number, ry: number) => (x: number, y: number) => ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1;
+  const box = (x0: number, y0: number, x1: number, y1: number) => (x: number, y: number) => x >= x0 && x < x1 && y >= y0 && y < y1;
+  const stroke = (x0: number, y0: number, x1: number, y1: number, w: number) => (x: number, y: number) => {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const t = Math.max(0, Math.min(1, ((x - x0) * dx + (y - y0) * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(x - x0 - dx * t, y - y0 - dy * t) <= w;
+  };
+  const triangle = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) => (x: number, y: number) => {
+    const s = (px: number, py: number, qx: number, qy: number, rx: number, ry: number) => (px - rx) * (qy - ry) - (qx - rx) * (py - ry);
+    const d1 = s(x, y, ax, ay, bx, by);
+    const d2 = s(x, y, bx, by, cx, cy);
+    const d3 = s(x, y, cx, cy, ax, ay);
+    return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+  };
+
+  function animalShapes(kind: Animal, pose: AnimalPose, c: Coat): { shapes: Shape[]; dots: Array<[number, number, string]> } {
+    const body = (inside: Shape['inside'], below: number): Shape => ({ inside, fill: c.coat, shade: c.shade, below });
+    const part = (inside: Shape['inside'], fill = c.coat): Shape => ({ inside, fill });
+    const legs = (xs: number[], width: number, top: number) => xs.map((x) => part(box(x, top, x + width, 14), c.shade));
+    const asleep = pose === 'sleep';
+    if (kind === 'dog') {
+      if (pose === 'sit') return { shapes: [part(stroke(6, 13.5, 3, 13, 0.9)), body(oval(9.5, 11.5, 3.2, 2.3), 12.5), ...legs([13.2], 1.8, 9.5), body(oval(11.5, 9.2, 3.6, 3.4), 10.5), part(oval(15, 5.5, 2.6, 2.4)), part(oval(17.4, 6.3, 1.6, 1.2)), part(oval(14, 4.6, 1, 1.8), c.ear)], dots: [[15.8, 5, c.eye], [18.8, 6, c.nose]] };
+      if (asleep) return { shapes: [part(stroke(5.5, 12.6, 8.5, 13.8, 0.9)), body(oval(11, 11.6, 6, 2.4), 12.5), part(oval(16.4, 12, 2.4, 2)), part(oval(18.3, 12.6, 1.4, 1)), part(oval(15.4, 11.4, 1, 1.4), c.ear)], dots: [[16.6, 11.6, c.dark], [17.4, 11.6, c.dark], [19.4, 12.3, c.nose]] };
+      const xs = pose === 'a' ? [6.2, 8.8, 13.2, 15.8] : [7, 8, 14, 15];
+      return { shapes: [part(stroke(5, 8, 3, 4.5, 0.9)), ...legs(xs, 1.6, 9.5), body(oval(10.5, 8.5, 5.8, 2.9), 9.5), part(oval(16.5, 5.5, 2.7, 2.5)), part(oval(19, 6.4, 1.6, 1.2)), part(oval(15.4, 4.6, 1, 1.8), c.ear)], dots: [[17.3, 5, c.eye], [20.3, 6, c.nose]] };
+    }
+    if (kind === 'cat') {
+      const ears = (hx: number, hy: number): Shape[] => [part(triangle(hx - 1.8, hy - 1.2, hx - 1, hy - 3.8, hx, hy - 1.6), c.ear), part(triangle(hx, hy - 1.6, hx + 1.2, hy - 3.8, hx + 1.9, hy - 1.4), c.ear)];
+      if (pose === 'sit') return { shapes: [part(stroke(8, 13.5, 4.5, 13, 0.8)), part(stroke(4.5, 13, 3.5, 11, 0.8)), body(oval(10.5, 10.4, 3.2, 3.4), 11.5), ...legs([11.6], 1.2, 10.5), part(oval(12.6, 6, 2.4, 2.2)), ...ears(12.6, 6)], dots: [[13.4, 5.6, c.eye], [14.6, 6.6, c.nose]] };
+      if (asleep) return { shapes: [part(stroke(6.5, 13, 12, 13.8, 0.8)), body(oval(10.5, 11.8, 5, 2.4), 12.6), part(oval(14.4, 11.6, 2.2, 1.9)), ...ears(14.4, 12.2)], dots: [[14.8, 11.6, c.dark], [15.6, 11.6, c.dark]] };
+      const xs = pose === 'a' ? [7, 9, 12.5, 14.5] : [7.8, 8.6, 13.2, 14];
+      return { shapes: [part(stroke(6, 8.5, 3.6, 5.2, 0.8)), part(stroke(3.6, 5.2, 4.6, 3, 0.8)), ...legs(xs, 1.2, 10), body(oval(10.5, 9, 4.6, 2.3), 9.8), part(oval(15.5, 6.6, 2.4, 2.2)), ...ears(15.5, 6.6)], dots: [[16.5, 6.1, c.eye], [17.8, 7.1, c.nose]] };
+    }
+    // A capybara: a barrel of a body, a square head and short legs, and sometimes a tangerine on top.
+    const fruit = (hx: number, hy: number): Shape[] => (c.tangerine ? [part(oval(hx, hy - 0.4, 2, 1.8), '#ff8a3d'), part(box(hx - 0.2, hy - 3, hx + 1.6, hy - 2), '#6fa83a')] : []);
+    if (asleep) return { shapes: [body(oval(10.5, 11.4, 6.6, 2.6), 12.4), part(oval(17, 11.6, 3, 2)), part(oval(15.2, 9.9, 0.9, 0.9), c.ear), ...fruit(16.4, 8.6)], dots: [[17.4, 11.2, c.dark], [18.2, 11.2, c.dark], [19.6, 11.6, c.nose]] };
+    if (pose === 'sit' || pose === 'swim') return { shapes: [body(oval(10, 10.2, 6.4, 3.3), 11.2), part(oval(16.6, 7.6, 3.2, 2.3)), part(oval(18.8, 8.2, 1.8, 1.6)), part(oval(15, 5.3, 0.9, 0.9), c.ear), ...fruit(16, 4.4)], dots: [[17, 6.9, c.eye], [20.1, 7.6, c.nose]] };
+    const xs = pose === 'a' ? [5.5, 8, 12, 14.5] : [6.3, 7.3, 12.8, 13.8];
+    return { shapes: [...legs(xs, 1.8, 11), body(oval(10, 8.6, 6.5, 3.3), 9.8), part(oval(16.8, 6.5, 3.2, 2.3)), part(oval(19, 7.1, 1.8, 1.6)), part(oval(15.2, 4.2, 0.9, 0.9), c.ear), ...fruit(16.2, 3.3)], dots: [[17.2, 5.8, c.eye], [20.3, 6.5, c.nose]] };
+  }
+
+  function animals() {
+    for (const kind of Object.keys(COATS) as Animal[]) {
+      COATS[kind].forEach((c, coat) => {
+        for (const pose of ['a', 'b', 'sit', 'sleep', 'swim'] as AnimalPose[]) {
+          const { shapes, dots } = animalShapes(kind, pose, c);
+          // Bathing, only what's above the water shows.
+          const above = pose === 'swim' ? 10.5 : ANIMAL_H;
+          const top = (x: number, y: number) => {
+            for (let i = shapes.length - 1; i >= 0; i--) if ((shapes[i] as Shape).inside(x + 0.5, y + 0.5)) return shapes[i] as Shape;
+            return null;
+          };
+          canvasTex(names.animal(kind, coat, pose), ANIMAL_W, ANIMAL_H, (ctx) => {
+            for (let y = 0; y < ANIMAL_H; y++) {
+              for (let x = 0; x < ANIMAL_W; x++) {
+                if (y + 0.5 > above) continue;
+                const s = top(x, y);
+                if (s) rect(ctx, s.shade && s.below !== undefined && y + 0.5 > s.below ? s.shade : s.fill, x, y, 1, 1);
+                else if (top(x - 1, y) || top(x + 1, y) || top(x, y - 1) || top(x, y + 1)) rect(ctx, c.dark, x, y, 1, 1);
+              }
+            }
+            for (const [x, y, colour] of dots) if (y + 0.5 <= above) rect(ctx, colour, Math.floor(x), Math.floor(y), 1, 1);
+          });
+        }
+      });
+    }
+  }
+
   // Landmarks the island earns (decision 68): a windmill, its sails drawn apart so the scene can turn
   // them, a fountain, a lighthouse, an observatory with its telescope out, and a hot-air balloon on a
   // tether. Drawn a pixel to a pixel and shown at the buildings' scale, so they stand as tall as landmarks.
@@ -1171,6 +1272,7 @@ export function drawnArt(): Art {
       lighthouse: { x: 0, y: -45 * A }, observatory: { x: 2 * A, y: -19 * A },
     },
     sailsAt: { x: 0, y: -36 * A },
+    animalCoats: { dog: COATS.dog.length, cat: COATS.cat.length, capybara: COATS.capybara.length },
 
     create(s, dressedFor) {
       scene = s;
@@ -1209,6 +1311,7 @@ export function drawnArt(): Art {
       nightAndSeasons();
       wildlife();
       landmarks();
+      animals();
     },
 
     dress(s, next) {

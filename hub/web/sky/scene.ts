@@ -7,8 +7,9 @@ import { actFor, READING, type ToolAct, type Trips } from '../shared/acts.ts';
 import type { Sound } from '../shared/sound.ts';
 import { sessionLabel, type BoardSession } from '../shared/format.ts';
 import { ACCENT_COLOUR, ACCENTS, MAX_LEVEL, names, WATERFALL_FRAMES, type Accent, type Art, type Decoration, type Edge, type HouseStyle, type Palette } from './art.ts';
-import { arrange, BUILDING_LABEL, destinations, edit, isItem, isPiece, ITEMS, move, movePiece, onWater, pieceAt, PIECES, placeOf, restyle, sameLayouts, unreachable, type ItemKind, type Outcome, type PieceKind, type Placed, type SectionLayout, type Tool, type Where } from './build.ts';
+import { arrange, BUILDING_LABEL, destinations, edit, isAnimal, isItem, isPiece, ITEMS, move, movePiece, onWater, pieceAt, PIECES, placeOf, restyle, sameLayouts, unreachable, type ItemKind, type Outcome, type PieceKind, type Placed, type SectionLayout, type Tool, type Where } from './build.ts';
 import { daylightAt, halloween, miraStar, seasonOf, type Daylight, type Season } from './daylight.ts';
+import { Pets } from './pets.ts';
 import { Wildlife } from './wildlife.ts';
 import { findPath, generateCells, hash, SEC, sectionOrigin, spotsAround, type BuildingType, type Cell, type Spot, type Template } from './world.ts';
 
@@ -283,6 +284,8 @@ export class SkyScene extends Phaser.Scene {
   #falling: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
   /** Birds, butterflies, fish, clouds, smoke and fireflies (decision 63). */
   #wild!: Wildlife;
+  /** The dogs, cats and capybaras I placed (decision 71). */
+  #pets!: Pets;
 
   constructor(options: SkyOptions) {
     super({ key: 'sky' });
@@ -447,7 +450,7 @@ export class SkyScene extends Phaser.Scene {
   preview(tool: Tool): string | null {
     if (!this.#ready) return null;
     const key = tool === 'path' ? names.tile('path') : tool === 'grass' ? names.tile('grass0') : tool === 'flowers' ? names.tile('flowers') : tool === 'water' ? names.tile('water')
-      : isItem(tool) ? this.#itemLook(tool).key : isPiece(tool) ? names.play(tool) : null;
+      : isItem(tool) ? this.#itemLook(tool).key : isPiece(tool) ? names.play(tool) : isAnimal(tool) ? names.animal(tool, 0, 'a') : null;
     return key ? this.textures.getBase64(key) : null;
   }
 
@@ -510,6 +513,18 @@ export class SkyScene extends Phaser.Scene {
       overIsland: (obj) => this.#overIsland(obj),
       sound: (name, x) => this.#sound(name, x),
     });
+    this.#pets = new Pets({
+      scene: this,
+      art: this.#art,
+      cells: () => this.#cells,
+      walkable: this.#walkable,
+      spotXY: (cell) => this.#spotXY(cell),
+      tileXY: (c, r) => this.#tileXY(c, r),
+      waterDrop: WATER_DROP * this.#art.scale,
+      daylight: () => this.#daylight,
+      mirlings: () => [...this.#mirlings.values()].filter((m) => !m.removed).map((m) => ({ cell: m.cell, moving: m.moving })),
+      overIsland: (obj) => this.#overIsland(obj),
+    });
     this.#selectMark = this.add.image(0, 0, names.select).setVisible(false);
     this.#cursor = this.add.image(0, 0, names.cursor(true)).setVisible(false);
     this.#ghost = this.add.image(0, 0, names.cursor(true)).setVisible(false).setAlpha(0.6);
@@ -552,6 +567,7 @@ export class SkyScene extends Phaser.Scene {
     }
     this.#placeMira(time);
     this.#wild.update(time, delta);
+    this.#pets.update(time);
     this.#followCamera(delta);
     for (const light of this.#lights) {
       if (!light.fire || !light.img.visible || reduceMotion) continue;
@@ -1369,11 +1385,17 @@ export class SkyScene extends Phaser.Scene {
   /** A pat on the head for the mirling whose story is open: a heart, and a hop if it's standing still. */
   #pet(col: Mirling): void {
     if (reduceMotion) return;
-    const A = this.#art.scale;
-    const heart = this.#overIsland(this.add.image(col.pos.x + col.facing * 4 * A, col.pos.y - this.#art.sizes.creature - 2 * A, names.heart).setOrigin(0.5, 1).setDepth(500004).setScale(A * 0.75));
-    this.tweens.add({ targets: heart, y: heart.y - 12 * A, alpha: 0, scale: A * 1.1, duration: 1100, ease: 'Sine.easeOut', onComplete: () => heart.destroy() });
-    this.#sound('boop', col.pos.x);
+    this.#heart(col.pos.x + col.facing * 4 * this.#art.scale, col.pos.y - this.#art.sizes.creature);
     if (!col.moving && !col.aloft && col !== this.#held) this.#hop(col, { x: col.pos.x, y: col.pos.y }, () => {});
+  }
+
+  /** A heart rising from a point, with a boop. */
+  #heart(x: number, y: number): void {
+    if (reduceMotion) return;
+    const A = this.#art.scale;
+    const heart = this.#overIsland(this.add.image(x, y - 2 * A, names.heart).setOrigin(0.5, 1).setDepth(500004).setScale(A * 0.75));
+    this.tweens.add({ targets: heart, y: heart.y - 12 * A, alpha: 0, scale: A * 1.1, duration: 1100, ease: 'Sine.easeOut', onComplete: () => heart.destroy() });
+    this.#sound('boop', x);
   }
 
   /** The camera keeps the mirling it follows, or the tour's, in the middle of the clear space. */
@@ -1849,6 +1871,7 @@ export class SkyScene extends Phaser.Scene {
    */
   #dressIsland(): void {
     this.#wild.relayout();
+    this.#pets.relayout();
     this.#wearPaths();
     for (const v of this.#visitors) v.destroy();
     this.#visitors = [];
@@ -2124,6 +2147,8 @@ export class SkyScene extends Phaser.Scene {
     if (ok && isItem(tool)) {
       const look = this.#itemLook(tool);
       this.#ghost.setTexture(look.key).setOrigin(look.ox, look.oy).setScale(look.scale).setPosition(x, y + look.drop).setDepth(y + look.drop + 0.5).setVisible(true);
+    } else if (ok && isAnimal(tool)) {
+      this.#ghost.setTexture(names.animal(tool, 0, 'sit')).setOrigin(0.5, 1).setScale(1).setPosition(x, y).setDepth(y + 0.5).setVisible(true);
     } else if (ok && isPiece(tool)) {
       const a = this.#art.anchor(names.play(tool));
       this.#ghost.setTexture(names.play(tool)).setOrigin(a.ox, a.oy).setScale(1).setPosition(x, y).setDepth(y + 0.5).setVisible(true);
@@ -2133,6 +2158,16 @@ export class SkyScene extends Phaser.Scene {
   }
 
   #buildClick(p: Phaser.Input.Pointer): void {
+    // Remove takes an animal away from wherever it has wandered, by the home it was given (decision 71).
+    const pet = this.#build.tool === 'remove' ? this.#pets.at(this.cameras.main.getWorldPoint(p.x, p.y)) : null;
+    const home = pet ? this.#target(pet.home) : null;
+    if (home) {
+      const result = edit(this.#layouts[home.sec.name], 'remove', home.cell, home.where.place, home.where.own);
+      if ('layout' in result) {
+        this.#setLayout(home.sec.name, result.layout, true);
+        return this.#hint(this.#toolHint());
+      }
+    }
     const t = this.#target(this.#tileUnder(p));
     if (!t) return this.#hint("That's the sky. Build on the island's land and water.");
     const result = this.#outcome(t);
@@ -2163,10 +2198,11 @@ export class SkyScene extends Phaser.Scene {
     const { tool } = this.#build;
     if (tool === 'move') return 'Click a building or a play piece, then a free tile. Buildings stay on their own ground.';
     if (tool === 'restyle') return 'Click a house to change its style.';
-    if (tool === 'remove') return 'Click a tree, plant, decoration or play piece to take it away.';
+    if (tool === 'remove') return 'Click a tree, plant, decoration, play piece or animal to take it away.';
     if (tool === 'water') return 'Click land to dig a pond. Paint path, grass or flowers on a pond to fill it in.';
     if (tool === 'path' || tool === 'grass' || tool === 'flowers') return `Click tiles anywhere on the island to make them ${tool}.`;
     if (isPiece(tool)) return `Click a free tile anywhere on the island to put up ${tool === 'swings' ? 'swings' : `a ${tool}`}. Mirlings play there while they wait for you.`;
+    if (isAnimal(tool)) return `Click land to give a ${tool} a home. It wanders round it, and you can pet it.`;
     if (onWater(tool)) return tool === 'boat' ? 'Click a stream or pond to put a boat on it.' : 'Click a stream or pond to float lily pads on it.';
     const label = ITEMS[tool].label.toLowerCase();
     const what = label.endsWith('s') ? label : `${/^[aeiou]/.test(label) ? 'an' : 'a'} ${label}`;
@@ -2221,6 +2257,14 @@ export class SkyScene extends Phaser.Scene {
         if (col && id === this.#selected) this.#pet(col);
         if (id) this.#options.onSelect(id);
         else if (section) this.#options.onSection?.(section);
+        else {
+          // An animal can be petted any time (decision 71).
+          const pet = this.#pets.at(cam.getWorldPoint(p.x, p.y));
+          if (pet) {
+            this.#pets.pat(pet);
+            this.#heart(pet.pos.x, pet.pos.y - 10 * this.#art.scale);
+          }
+        }
       }
       this.#drag = null;
     });
