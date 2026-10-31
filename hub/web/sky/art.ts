@@ -66,6 +66,13 @@ export const names = {
   star: 'star.mira',
   /** The z's rising from a sleeping mirling. */
   zzz: 'zzz',
+  /** Wildlife (decision 63): a bird and a butterfly flapping in two frames, a fish, the rings of its splash, a cloud and a firefly. */
+  bird: (frame: 'a' | 'b') => `bird.${frame}`,
+  butterfly: (frame: 'a' | 'b') => `butterfly.${frame}`,
+  fish: 'fish',
+  splash: (frame: number) => `splash.${frame}`,
+  cloud: (i: number) => `cloud.${i}`,
+  firefly: 'firefly',
   beacon: 'beacon',
   bubble: 'bubble',
   smoke: 'smoke',

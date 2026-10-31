@@ -7,6 +7,7 @@ import { sessionLabel, type BoardSession } from '../shared/format.ts';
 import { ACCENT_COLOUR, ACCENTS, MAX_LEVEL, names, WATERFALL_FRAMES, type Accent, type Art, type Decoration, type Edge, type HouseStyle, type Palette } from './art.ts';
 import { arrange, BUILDING_LABEL, destinations, edit, isItem, isPiece, ITEMS, move, movePiece, onWater, pieceAt, PIECES, placeOf, restyle, sameLayouts, unreachable, type ItemKind, type Outcome, type PieceKind, type Placed, type SectionLayout, type Tool, type Where } from './build.ts';
 import { daylightAt, halloween, miraStar, seasonOf, type Daylight, type Season } from './daylight.ts';
+import { Wildlife } from './wildlife.ts';
 import { findPath, generateCells, hash, SEC, sectionOrigin, spotsAround, type BuildingType, type Cell, type Spot, type Template } from './world.ts';
 
 type Status = 'working' | 'waiting' | 'needs-me' | 'my-turn' | 'failed' | 'ended';
@@ -252,6 +253,8 @@ export class SkyScene extends Phaser.Scene {
   #lights: Array<{ img: Image; fire: boolean; strength: number; phase: number }> = [];
   #visitors: Image[] = [];
   #falling: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
+  /** Birds, butterflies, fish, clouds, smoke and fireflies (decision 63). */
+  #wild!: Wildlife;
 
   constructor(options: SkyOptions) {
     super({ key: 'sky' });
@@ -422,6 +425,17 @@ export class SkyScene extends Phaser.Scene {
     this.#art.create(this, this.#season);
     for (const key of this.textures.getTextureKeys()) if (!before.has(key)) this.#artKeys.add(key);
     this.#drawBackdrop();
+    this.#wild = new Wildlife({
+      scene: this,
+      art: this.#art,
+      cells: () => this.#cells,
+      tileXY: (c, r) => this.#tileXY(c, r),
+      fit: () => this.#fit,
+      daylight: () => this.#daylight,
+      season: () => this.#season,
+      inSky: (obj) => this.#inSky(obj),
+      overIsland: (obj) => this.#overIsland(obj),
+    });
     this.#selectMark = this.add.image(0, 0, names.select).setVisible(false);
     this.#cursor = this.add.image(0, 0, names.cursor(true)).setVisible(false);
     this.#ghost = this.add.image(0, 0, names.cursor(true)).setVisible(false).setAlpha(0.6);
@@ -463,6 +477,7 @@ export class SkyScene extends Phaser.Scene {
       this.#updateSky();
     }
     this.#placeMira(time);
+    this.#wild.update(time, delta);
     for (const light of this.#lights) {
       if (!light.fire || !light.img.visible || reduceMotion) continue;
       light.img.setAlpha(this.#daylight.night * light.strength * (0.82 + 0.18 * Math.sin(time / 90 + light.phase * 7) * Math.sin(time / 230 + light.phase * 3)));
@@ -1493,6 +1508,7 @@ export class SkyScene extends Phaser.Scene {
    * each section in winter, and snow, leaves or blossom falling (decision 62).
    */
   #dressIsland(): void {
+    this.#wild.relayout();
     for (const v of this.#visitors) v.destroy();
     this.#visitors = [];
     this.#falling?.destroy();

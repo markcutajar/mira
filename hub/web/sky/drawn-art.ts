@@ -88,6 +88,12 @@ const MAPS = {
   snowman: ['....oooo....', '....oKKo....', '...oKKKKo...', '..oooooooo..', '...oWWWWo...', '..oWeWWeWo..', '..oWWNNWWo..', '..oWWWWWWo..', '...oRRRRo...', '..oWWRWWWo..', '.oWWWRWbWWo.', 'oWWWWWWWWWWo', 'oWWWWWbWWWSo', 'oWWWWWWWWWSo', '.oWWWWWWWSo.', '..oooooooo..'],
   star: ['....a....', '....a....', '....r....', '...rcr...', 'aarcWcraa', '...rcr...', '....r....', '....a....', '....a....'],
   zzz: ['zzzz', '...z', '..z.', '.z..', 'zzzz'],
+  // Wildlife (decision 63): a bird with its wings up and down, a butterfly open and shut, drawn white
+  // so the scene can colour each one, a goldfish, and the two rings of its splash.
+  bird: { a: ['o.......o', 'wo.....ow', '.ww.o.ww.', '...www...'], b: ['.........', '...www...', '.wwwowww.', 'wo.....ow'] },
+  butterfly: { a: ['ww.ww', 'wWbWw', '.wbw.', '.w.w.'], b: ['.w.w.', '.wbw.', '..b..', '.....'] },
+  fish: ['.ooo..o', 'oOOOOoo', '.ooo..o'],
+  splash: [['..wwww..', '.w....w.', '..wwww..'], ['...wwwwww...', '.ww......ww.', '...wwwwww...']],
   console: {
     a: ['ooooooooooo', 'oKKKKKKKKKo', 'oKggKgggKKo', 'oKgggKKKKKo', 'oKggggKgKKo', 'oKgKKKKKKKo', 'ooooooooooo', '.oSSSSSSSo.', 'ooooooooooo'],
     b: ['ooooooooooo', 'oKKKKKKKKKo', 'oKgggKggKKo', 'oKggKgggKKo', 'oKgggggKKKo', 'oKgcKKKKKKo', 'ooooooooooo', '.oSSSSSSSo.', 'ooooooooooo'],
@@ -598,6 +604,36 @@ export function drawnArt(): Art {
     pixelMap(names.zzz, MAPS.zzz, { z: '#e8ecff' });
   }
 
+  // Wildlife (decision 63), and clouds to drift under the island: overlapping puffs, lit from above.
+  function wildlife() {
+    for (const frame of ['a', 'b'] as const) {
+      pixelMap(names.bird(frame), MAPS.bird[frame], { o: '#2a2f45', w: '#f4f1e6' });
+      pixelMap(names.butterfly(frame), MAPS.butterfly[frame], { w: '#ffffff', W: '#d8d8e8', b: '#2a2f45' });
+    }
+    pixelMap(names.fish, MAPS.fish, { o: '#c25a1f', O: '#ff9a4d' });
+    MAPS.splash.forEach((rows, frame) => pixelMap(names.splash(frame), rows, { w: '#cfe8ff' }));
+    pixelMap(names.firefly, ['.y.', 'yWy', '.y.'], { y: '#d9f27a', W: '#fff7a8' });
+    // Drawn three times the size of the puffs below, so a cloud's pixels match the island's.
+    const puffs: Array<Array<[number, number, number]>> = ([
+      [[10, 9, 6], [20, 7, 8], [31, 9, 6], [16, 11, 5], [26, 11, 5]],
+      [[9, 11, 6], [19, 8, 8], [30, 7, 9], [41, 10, 7], [24, 12, 6], [35, 12, 5]],
+      [[8, 7, 5], [16, 5, 6], [23, 7, 5]],
+    ] as Array<Array<[number, number, number]>>).map((circles) => circles.map(([x, y, r]) => [x * 3, y * 3, r * 3] as [number, number, number]));
+    puffs.forEach((circles, i) => {
+      const w = Math.max(...circles.map(([x, , r]) => x + r)) + 2;
+      const h = Math.max(...circles.map(([, y, r]) => y + r)) + 1;
+      const inside = (x: number, y: number) => circles.some(([cx, cy, r]) => Math.hypot(x + 0.5 - cx, (y + 0.5 - cy) * 1.3) <= r);
+      canvasTex(names.cloud(i), w, h, (ctx) => {
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            if (!inside(x, y)) continue;
+            rect(ctx, !inside(x, y + 2) || !inside(x, y + 4) ? '#c9d2e6' : !inside(x, y - 2) ? '#ffffff' : '#eef1f8', x, y, 1, 1);
+          }
+        }
+      });
+    });
+  }
+
   function isoBlock(ctx: Ctx, cx: number, gy: number, hw: number, wallH: number, left: string, right: string, top: string) {
     const bottoms = bottomsFor(cx, gy, hw);
     for (let x = cx - hw; x < cx + hw; x++) rect(ctx, x < cx ? left : right, x, (bottoms[x] ?? 0) - wallH + 1, 1, wallH);
@@ -949,6 +985,7 @@ export function drawnArt(): Art {
       ring();
       props();
       nightAndSeasons();
+      wildlife();
     },
 
     dress(s, next) {
