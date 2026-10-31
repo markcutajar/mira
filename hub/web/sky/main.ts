@@ -3,10 +3,13 @@
 // either side finds it on the other.
 
 import { clock, esc, markRead, projectLabel, sessionLabel, toast } from '../shared/format.ts';
+import { LANDMARKS, type Landmark, type Unlocks } from '../shared/landmarks.ts';
 import { connectLive } from '../shared/live.ts';
 import { createNotifier } from '../shared/notify.ts';
+import { createSound } from '../shared/sound.ts';
 import { createPanel, linkedSession } from '../shared/panel.ts';
 import { drawnArt } from './drawn-art.ts';
+import { createFootprint } from './footprint.ts';
 import { createPalette } from './palette.ts';
 import { SkyScene } from './scene.ts';
 import { createSettings } from './settings.ts';
@@ -22,13 +25,33 @@ const skyEl = $('sky');
 const zoomIn = $<HTMLButtonElement>('zoom-in');
 const zoomOut = $<HTMLButtonElement>('zoom-out');
 const buildToggle = $<HTMLButtonElement>('build-toggle');
+const followToggle = $<HTMLButtonElement>('follow-toggle');
 let building = false;
 
 const sideShown = () => !hud.classList.contains('folded');
 const openPanel = () => document.querySelector<HTMLElement>('.panel:not([hidden])');
 
+// The island follows the clock and the calendar, unless switched off in Settings, when it's always a
+// summer's day. ?sky=2026-12-24T22:00 shows it at another time, to try out night and the seasons; the
+// clock runs on from there (decision 62).
+const skyAt = Date.parse(new URLSearchParams(location.search).get('sky') ?? '');
+const skew = Number.isNaN(skyAt) ? 0 : skyAt - Date.now();
+const CLOCK_KEY = 'mira.clock';
+const clockOn = $<HTMLInputElement>('clock-on');
+try { clockOn.checked = localStorage.getItem(CLOCK_KEY) !== 'off'; } catch { clockOn.checked = true; }
+clockOn.addEventListener('change', () => {
+  try { localStorage.setItem(CLOCK_KEY, clockOn.checked ? 'on' : 'off'); } catch { /* for this visit only */ }
+  scene.lookAtClock();
+});
+const summerDay = () => new Date(new Date().getFullYear(), 6, 15, 12);
+
+// Sound (decision 69): a chime when a session calls, and the island's own, each off until switched on.
+const sound = createSound({ chime: $<HTMLInputElement>('chime-on'), island: $<HTMLInputElement>('sounds-on'), volume: $<HTMLInputElement>('volume') });
+
 const scene = new SkyScene({
   art: drawnArt(),
+  onSound: (name, pan) => sound.island(name, pan),
+  now: () => (clockOn.checked ? new Date(Date.now() + skew) : summerDay()),
   insets: () => ({
     top: $('hud-top').getBoundingClientRect().bottom + 8,
     bottom: window.innerHeight - $('hud-bottom').getBoundingClientRect().top,
@@ -53,10 +76,18 @@ const scene = new SkyScene({
       .catch(() => toast("The hub isn't reachable, so that change wasn't kept."));
   },
   onBuildHint: (text) => palette.hint(text),
+  onFollow: (on) => followToggle.setAttribute('aria-pressed', String(on)),
 });
 
 const palette = createPalette($('palette'), {
   preview: (tool) => scene.preview(tool),
+  locked: (tool) => {
+    if (!(tool in LANDMARKS)) return null;
+    const { need, days } = LANDMARKS[tool as Landmark];
+    const progress = unlocks?.[tool as Landmark];
+    if (progress?.at) return null;
+    return `Unlocks with ${need}${progress ? ` · ${progress.have} of ${progress.need} ${days ? 'days' : 'turns'} so far` : ''}`;
+  },
   onTool: (tool) => scene.setTool(tool),
   onUndo: () => {
     scene.undo();
@@ -76,13 +107,64 @@ const panel = createPanel({
     scene.select(id);
     if (id) scene.reveal(id);
     else scene.showIsland(); // closing a story goes back to the whole island
+    // Follow keeps the camera on the open story's mirling (decision 65).
+    followToggle.hidden = !id;
+    if (!id) scene.setFollow(false);
     sidebar.render();
   },
 });
+// Landmarks (decision 68): what the hub says each has earned, looked at when the page opens and every
+// ten minutes, with a word in this browser the first time something is unlocked.
+const UNLOCKED_KEY = 'mira.unlocked';
+let unlocks: Unlocks | null = null;
+async function lookAtUnlocks() {
+  try {
+    const res = await fetch('/api/unlocks');
+    if (!res.ok) return;
+    unlocks = ((await res.json()) as { unlocks: Unlocks }).unlocks;
+  } catch {
+    return; // the hub isn't reachable: try again later
+  }
+  const earned = (Object.keys(LANDMARKS) as Landmark[]).filter((kind) => unlocks?.[kind]?.at);
+  let seen: string[] = [];
+  try { seen = JSON.parse(localStorage.getItem(UNLOCKED_KEY) ?? '[]') as string[]; } catch { /* nothing seen yet */ }
+  const fresh = earned.filter((kind) => !seen.includes(kind)).map((kind) => LANDMARKS[kind].label);
+  if (fresh.length) {
+    try { localStorage.setItem(UNLOCKED_KEY, JSON.stringify(earned)); } catch { /* said again next time */ }
+    toast(`New in Build: ${fresh.length > 1 ? `${fresh.slice(0, -1).join(', ')} and ${fresh.at(-1)}` : fresh[0]}.`);
+  }
+  if (building) palette.show(true);
+}
+void lookAtUnlocks();
+setInterval(() => void lookAtUnlocks(), 10 * 60_000);
+
+followToggle.addEventListener('click', () => scene.setFollow(followToggle.getAttribute('aria-pressed') !== 'true'));
+
+// The tour (decision 65): switched on in Settings, after three minutes without my touching Mira, with
+// no story or build mode open, the camera drifts from one busy mirling to the next until I'm back.
+const TOUR_KEY = 'mira.tour';
+const TOUR_AFTER_MS = 3 * 60_000;
+const tourOn = $<HTMLInputElement>('tour-on');
+try { tourOn.checked = localStorage.getItem(TOUR_KEY) === 'on'; } catch { /* off */ }
+tourOn.addEventListener('change', () => {
+  try { localStorage.setItem(TOUR_KEY, tourOn.checked ? 'on' : 'off'); } catch { /* for this visit only */ }
+  if (!tourOn.checked) scene.stopTour();
+});
+let touched = Date.now();
+for (const type of ['pointermove', 'pointerdown', 'keydown', 'wheel']) {
+  window.addEventListener(type, () => {
+    touched = Date.now();
+    if (scene.touring) scene.stopTour();
+  }, { capture: true, passive: true });
+}
+setInterval(() => {
+  if (tourOn.checked && !scene.touring && !building && !panel.current() && Date.now() - touched > TOUR_AFTER_MS) scene.startTour();
+}, 5000);
 
 // The live link only calls back once data arrives, by which time the side panel below exists.
-// Settings (decisions 59 and 60): how Mira calls for me, and its own updates.
-const settings = createSettings({ panel: $('settings'), toggle: $<HTMLButtonElement>('settings-toggle'), chip: $<HTMLButtonElement>('update-chip'), count: $('n-update'), box: $('update') });
+// Settings (decisions 59 to 61): how Mira calls for me, what it costs the machine, and its own updates.
+const footprint = createFootprint({ box: $('footprint'), calm: $<HTMLInputElement>('calm-on') });
+const settings = createSettings({ panel: $('settings'), toggle: $<HTMLButtonElement>('settings-toggle'), chip: $<HTMLButtonElement>('update-chip'), count: $('n-update'), box: $('update') }, (open) => footprint.show(open));
 
 const live = connectLive({
   hold: $<HTMLInputElement>('hold'),
@@ -134,12 +216,14 @@ const notifier = createNotifier({
     panel.open(id);
     scene.focusSession(id);
   },
+  onCall: (status) => sound.chime(status),
 });
 
 function syncScene() {
   const labels = Object.fromEntries(live.systems.filter((s) => s.label).map((s) => [s.name, s.label as string]));
   const growth = Object.fromEntries(live.systems.filter((s) => s.growth).map((s) => [s.name, s.growth as NonNullable<typeof s.growth>]));
-  scene.sync(live.sessions, live.systems.map((s) => s.name), labels, growth);
+  const trips = Object.fromEntries(live.systems.filter((s) => s.trips).map((s) => [s.name, s.trips as NonNullable<typeof s.trips>]));
+  scene.sync(live.sessions, live.systems.map((s) => s.name), labels, growth, trips);
   $('empty').hidden = live.sessions.length > 0 || live.systems.length > 0;
 }
 
@@ -256,6 +340,7 @@ if (!('Phaser' in window)) {
     scale: { mode: Phaser.Scale.NONE, width: Math.round(skyEl.clientWidth * d), height: Math.round(skyEl.clientHeight * d), zoom: 1 / d },
     scene: [scene],
   });
+  footprint.pace(game);
   window.addEventListener('resize', () => {
     const dd = DPR();
     game.scale.resize(Math.round(skyEl.clientWidth * dd), Math.round(skyEl.clientHeight * dd));

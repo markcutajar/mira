@@ -7,6 +7,7 @@ import { stableId } from '../src/claude-code/source.ts';
 import { CONTRACT_VERSION } from '../../contracts/src/index.ts';
 import { Roster } from '../src/roster.ts';
 import { createHub } from '../src/server.ts';
+import type { FootprintReport } from '../src/footprint.ts';
 import { emptyUsage, type Edit, type SourceAdapter } from '../src/sources.ts';
 import { Store } from '../src/store.ts';
 import { WebSocket } from 'ws';
@@ -354,6 +355,13 @@ describe('hub server', () => {
     } finally {
       own.close();
     }
+  });
+
+  it('says what the hub and the terminal host cost the machine', async () => {
+    const report = (await (await fetch(`${base}/api/footprint`)).json()) as FootprintReport;
+    assert.ok(report.hub.cpu >= 0 && report.hub.cpu <= 1);
+    assert.ok(report.hub.memory > 1e6);
+    assert.ok(report.terminals === null || (report.terminals.usage?.memory ?? 0) > 1e6);
   });
 
   it('starts a new session in a project, with the prompt typed in for me', async () => {

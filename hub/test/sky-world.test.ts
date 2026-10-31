@@ -77,6 +77,14 @@ describe('build mode', () => {
     assert.deepEqual([at(cells, 8, 1).ch, at(cells, 8, 1).walk], ['g', true]);
   });
 
+  it('puts up fences, hedges and flowering bushes, which mirlings walk round (decision 66)', () => {
+    const cells = generateCells(['code']);
+    const free = [...cells.values()].filter((cell) => cell.section === 0 && cell.walk && cell.ch === 'g' && cell.c > c0 && cell.r > r0 && cell.c < c0 + SEC - 1 && cell.r < r0 + SEC - 1).slice(0, 3);
+    const kinds = ['fence', 'hedge', 'flower-bush'];
+    arrange(cells, 0, 'code', { placed: Object.fromEntries(free.map((cell, i) => [`${cell.c - c0},${cell.r - r0}`, kinds[i] as string])) });
+    assert.deepEqual(free.map((cell) => [cell.item, cell.walk]), kinds.map((kind) => [kind, false]));
+  });
+
   it('moves buildings to free tiles, lets two swap places, and keeps a house its style', () => {
     const plain = arrange(generateCells(['code']), 0, 'code');
     const cells = generateCells(['code']);

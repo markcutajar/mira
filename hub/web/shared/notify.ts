@@ -12,6 +12,7 @@
 // Settings switch each way of calling on or off on its own: the system's notifications, the pop-up
 // and the flash (decision 59).
 
+import type { AppUsage } from '../../src/footprint-report.ts';
 import type { Story } from '../../src/sources.ts';
 import { folder, markRead, sessionLabel, type BoardSession, type PendingPrompt } from './format.ts';
 
@@ -52,6 +53,8 @@ declare global {
       onPopup?(handler: (action: PopupResult, id: string, session: string) => void): void;
       /** Takes Mira's update, closing the app and opening it again (decision 60); resolves to why not, or null. */
       update?(): Promise<string | null>;
+      /** What the app's own processes cost the machine (decision 61), measured since the last call. */
+      metrics?(): Promise<AppUsage | null>;
     };
   }
 }
@@ -85,6 +88,8 @@ export interface NotifierOptions {
   project(system: string): string;
   /** A notification was clicked: show its session. */
   onOpen(id: string): void;
+  /** A session started calling for me, or two started editing one file, for the chime (decision 69). */
+  onCall?(status: Worth | 'clash'): void;
 }
 
 export interface Notifier {
@@ -267,6 +272,8 @@ export function createNotifier(options: NotifierOptions): Notifier {
   async function fire(id: string, status: Worth): Promise<void> {
     const s = options.sessions().find((x) => x.id === id);
     if (!s || s.status !== status || !s.unread) return;
+    // The chime, when it's on, for any session but the one I'm looking at (decision 69).
+    if (!(inFront() && options.current() === id)) options.onCall?.(status);
     const say = speaks(id);
     if (!say) return;
     forget(id);
@@ -299,6 +306,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
   function fireClash(key: string): void {
     const pair = pairs(options.sessions()).get(key);
     if (!pair || shown.has(key)) return;
+    options.onCall?.('clash');
     const say = speaks();
     if (!say) return;
     shown.set(key, { status: 'clash' });

@@ -6,20 +6,25 @@
 // wall off a building or a play piece. No DOM or Phaser here, so it can be tested on its own.
 
 import type { SectionLayout } from '../../src/layout.ts';
+import { LANDMARKS } from '../shared/landmarks.ts';
 import { hash, SEC, sectionOrigin, templateBuildings, type BuildingType, type Cell, type HouseStyle, type Template, type TemplateBuilding } from './world.ts';
 
 export type { SectionLayout };
 
 export type ItemKind =
-  | 'tree' | 'tree-apple' | 'pine' | 'shrub' | 'flowerbed' | 'sunflowers' | 'mushrooms'
-  | 'lamp' | 'bench' | 'statue' | 'rock' | 'crates' | 'well' | 'campfire'
-  | 'lilies' | 'boat';
-export type ItemGroup = 'Plants' | 'Decor' | 'Water';
+  | 'tree' | 'tree-apple' | 'pine' | 'shrub' | 'flower-bush' | 'hedge' | 'flowerbed' | 'sunflowers' | 'mushrooms'
+  | 'lamp' | 'bench' | 'statue' | 'rock' | 'crates' | 'well' | 'campfire' | 'fence'
+  | 'lilies' | 'boat'
+  | 'windmill' | 'fountain' | 'observatory' | 'lighthouse' | 'balloon';
+/** Landmarks are earned before they can be built (decision 68). */
+export type ItemGroup = 'Plants' | 'Decor' | 'Water' | 'Landmarks';
 export const ITEMS: Record<ItemKind, { label: string; group: ItemGroup }> = {
   tree: { label: 'Oak tree', group: 'Plants' },
   'tree-apple': { label: 'Apple tree', group: 'Plants' },
   pine: { label: 'Pine tree', group: 'Plants' },
   shrub: { label: 'Shrub', group: 'Plants' },
+  'flower-bush': { label: 'Flowering bush', group: 'Plants' },
+  hedge: { label: 'Hedge', group: 'Plants' },
   flowerbed: { label: 'Flower bed', group: 'Plants' },
   sunflowers: { label: 'Sunflowers', group: 'Plants' },
   mushrooms: { label: 'Mushrooms', group: 'Plants' },
@@ -30,8 +35,14 @@ export const ITEMS: Record<ItemKind, { label: string; group: ItemGroup }> = {
   crates: { label: 'Crates', group: 'Decor' },
   well: { label: 'Well', group: 'Decor' },
   campfire: { label: 'Campfire', group: 'Decor' },
+  fence: { label: 'Fence', group: 'Decor' },
   lilies: { label: 'Lily pads', group: 'Water' },
   boat: { label: 'Rowing boat', group: 'Water' },
+  windmill: { label: LANDMARKS.windmill.label, group: 'Landmarks' },
+  fountain: { label: LANDMARKS.fountain.label, group: 'Landmarks' },
+  observatory: { label: LANDMARKS.observatory.label, group: 'Landmarks' },
+  lighthouse: { label: LANDMARKS.lighthouse.label, group: 'Landmarks' },
+  balloon: { label: LANDMARKS.balloon.label, group: 'Landmarks' },
 };
 export const isItem = (kind: string): kind is ItemKind => kind in ITEMS;
 export const onWater = (kind: ItemKind) => ITEMS[kind].group === 'Water';

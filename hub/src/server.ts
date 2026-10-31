@@ -9,8 +9,11 @@ import type { AddressInfo } from 'node:net';
 import { isAbsolute, relative, sep } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { CONTRACT_VERSION, MiraEvent } from '../../contracts/src/index.ts';
+import type { Trips } from '../web/shared/acts.ts';
 import { CLASH_MS, findClashes, type Clash } from './clashes.ts';
 import type { Editor, EditorTarget } from './editor.ts';
+import { usageMeter, type FootprintReport } from './footprint.ts';
+import { unlocksFrom } from './unlocks.ts';
 import type { Growth } from './growth.ts';
 import { MirlingNames, type Pack } from './mirlings.ts';
 import { Permissions, summarise, type Decision } from './permissions.ts';
@@ -61,6 +64,9 @@ const CLOCK_SKEW_MS = 10 * 60 * 1000;
 const HEARTBEAT_MS = 25 * 1000;
 const CHANGES_MS = 5 * 1000;
 const SYSTEMS_DAYS = 14;
+// The paths mirlings wear come from the last 30 days of trips, counted again at most every ten minutes (decision 67).
+const TRIP_DAYS = 30;
+const TRIPS_MS = 10 * 60 * 1000;
 const HISTORY_PAGE = 20;
 const MAX_MESSAGE = 20_000;
 // A session sits at its prompt in these, so a reply can be typed into its terminal (decision 57).
@@ -163,11 +169,22 @@ export function createHub(options: HubOptions) {
     json(res, { sessions: page, more: past.length > limit });
   }
 
+  let trips: Record<string, Trips> = {};
+  let tripsAt = -Infinity;
+  const tripsNow = () => {
+    if (Date.now() - tripsAt > TRIPS_MS) {
+      trips = store.trips(new Date(Date.now() - TRIP_DAYS * 86_400_000).toISOString());
+      tripsAt = Date.now();
+    }
+    return trips;
+  };
+
   const systems = () => store.systems(new Date(Date.now() - SYSTEMS_DAYS * 86_400_000).toISOString())
     .filter((s) => s.name !== 'unknown' && !gone('system', s.name, s.lastAt))
     .map((s) => {
       const growth = options.growth?.get(s.name);
-      return { ...s, ...(names.system[s.name] ? { label: names.system[s.name] } : {}), ...(growth ? { growth } : {}) };
+      const worn = tripsNow()[s.name];
+      return { ...s, ...(names.system[s.name] ? { label: names.system[s.name] } : {}), ...(growth ? { growth } : {}), ...(worn ? { trips: worn } : {}) };
     });
 
   function record(event: MiraEvent | null) {
@@ -434,6 +451,8 @@ export function createHub(options: HubOptions) {
     if (route === 'GET /api/update') return json(res, updateStatus());
     if (route === 'POST /api/update/check') return void checkForUpdate(res);
     if (route === 'POST /api/update') return void update(req, res);
+    if (route === 'GET /api/footprint') return void footprint(res);
+    if (route === 'GET /api/unlocks') return json(res, { unlocks: unlocksFrom(store.turnTally(), new Date()) });
     if (startOf) return void startIn(req, res, decodeName(startOf));
     if (historyOf) return history(res, decodeName(historyOf), url);
     if (route === 'GET /api/stream') return stream(req, res, url);
@@ -522,6 +541,13 @@ export function createHub(options: HubOptions) {
   }
   /** Sends every page where the update stands, for when a check finishes or an update starts. */
   const announceUpdate = () => broadcast('update', updateStatus());
+
+  // What the hub and the terminal host cost the machine, for Settings while it's open (decision 61).
+  const hubUsage = usageMeter();
+  async function footprint(res: ServerResponse) {
+    const report: FootprintReport = { hub: hubUsage(), terminals: (await terminals?.usage()) ?? null };
+    json(res, report);
+  }
 
   return { server, permissions, close, announceSystems, announceUpdate };
 }

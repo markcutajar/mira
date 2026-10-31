@@ -5,6 +5,7 @@
 // frames to these names in `create` (scene.textures can add frames under any key), and give each
 // building-like picture an anchor. Then pass it to the scene instead of `drawnArt()`.
 
+import type { Season } from './daylight.ts';
 import type { Palette } from './mirling.ts';
 import type { HouseStyle } from './world.ts';
 
@@ -13,23 +14,30 @@ export type Accent = 'y' | 'l' | 'o' | 'c' | 'p' | 'g';
 export const ACCENTS: Accent[] = ['y', 'c', 'l', 'o', 'p', 'g'];
 export const ACCENT_COLOUR: Record<Accent, string> = { y: '#ffd34d', l: '#c8a6ff', o: '#ff8a3d', c: '#6ff3ff', p: '#ff9ec7', g: '#9be36b' };
 
-export type Frame = 'a' | 'b';
-export type { HouseStyle, Palette };
+/** A mirling's two walking frames, and asleep (decision 62). */
+export type Frame = 'a' | 'b' | 'asleep';
+export type { HouseStyle, Palette, Season };
 /** Ground tiles; a bridge's deck has its planks across the way it's crossed. */
 export type TileKind = 'grass0' | 'grass1' | 'grass2' | 'flowers' | 'path' | 'water' | 'deck-c' | 'deck-r';
 export type Decoration =
-  | 'pine' | 'shrub' | 'flowerbed' | 'sunflowers' | 'mushrooms'
+  | 'pine' | 'shrub' | 'flower-bush' | 'flowerbed' | 'sunflowers' | 'mushrooms'
   | 'lamp' | 'bench' | 'statue' | 'rock' | 'crates' | 'well' | 'campfire'
-  | 'lilies' | 'boat';
+  | 'lilies' | 'boat'
+  | 'windmill' | 'fountain' | 'observatory' | 'lighthouse' | 'balloon';
 /** The edges of a tile's diamond: north-east and north-west at the back, south-east and south-west in front. */
 export type Edge = 'ne' | 'nw' | 'se' | 'sw';
-/** What a mirling holds while it works (decision 41): a book to read, a hammer to make, a console to run. */
-export type Prop = 'book.a' | 'book.b' | 'hammer' | 'spark' | 'console.a' | 'console.b';
+/** What a mirling holds while it works (decision 41): a book to read, a hammer to make, a console to run, and a crate it carries home when its turn is done (decision 64). */
+export type Prop = 'book.a' | 'book.b' | 'hammer' | 'spark' | 'console.a' | 'console.b' | 'crate';
 export const MAX_LEVEL = 5;
 export const WATERFALL_FRAMES = 3;
 
 export const names = {
   tile: (kind: TileKind) => `tile.${kind}`,
+  /**
+   * Grass worn by the mirlings' trips (decision 67), laid over a grass tile: trodden down, or worn to
+   * bare earth, along a track to each edge it carries on at, by the same bits as `joined`.
+   */
+  wear: (level: 1 | 2, mask: number) => `wear.${level}.${mask}`,
   /** A bridge's rail along one edge of its tile; the back ones stand behind a mirling crossing, the front ones before it. */
   rail: (edge: Edge) => `rail.${edge}`,
   /** Water pouring off the island where a stream reaches a front edge, hung from that edge of its tile. */
@@ -40,6 +48,11 @@ export const names = {
   building: (type: 'library' | 'workshop', level: number) => `${type}.${level}`,
   /** Plants, decorations and things on the water placed in build mode (decisions 39 and 44); placed oaks and apple trees use `tree`. */
   item: (kind: Decoration) => `item.${kind}`,
+  /**
+   * A fence or a hedge on a tile, joined to the same on its neighbours (decision 66): a bit for each
+   * way it joins, north-east 1, south-east 2, south-west 4 and north-west 8. Alone, it runs along its row.
+   */
+  joined: (kind: 'fence' | 'hedge', mask: number) => `joined.${kind}.${mask}`,
   /** Where mirlings wait for me (decisions 41 and 49): the swings' frame, without its seats, the slide and the trampoline. */
   play: (kind: 'swings' | 'slide' | 'trampoline') => `play.${kind}`,
   /** A rubber ring on the pond, in two halves so the mirling sits inside it. */
@@ -54,7 +67,30 @@ export const names = {
   /** The tile under the pointer in build mode: green where the tool can work, red where it can't. */
   cursor: (ok: boolean) => (ok ? 'cursor.ok' : 'cursor.bad'),
   creature: (palette: Palette, frame: Frame) => `creature.${palette}.${frame}`,
-  helper: (palette: Palette, frame: Frame) => `helper.${palette}.${frame}`,
+  helper: (palette: Palette, frame: 'a' | 'b') => `helper.${palette}.${frame}`,
+  /** The glow of a light at night (decision 62), laid over the island: warm lamplight, or a flickering fire. */
+  glow: (kind: 'warm' | 'fire') => `glow.${kind}`,
+  /** What the seasons bring: a jack-o'-lantern, a snowman, and what falls from the sky, one pixel or two. */
+  seasonal: (kind: 'pumpkin' | 'snowman') => `seasonal.${kind}`,
+  flake: (kind: 'snow' | 'leaf' | 'petal') => `flake.${kind}`,
+  /** Mira, the star, in the sky behind the island. */
+  star: 'star.mira',
+  /** The z's rising from a sleeping mirling. */
+  zzz: 'zzz',
+  /** Wildlife (decision 63): a bird and a butterfly flapping in two frames, a fish, the rings of its splash, a cloud and a firefly. */
+  bird: (frame: 'a' | 'b') => `bird.${frame}`,
+  butterfly: (frame: 'a' | 'b') => `butterfly.${frame}`,
+  fish: 'fish',
+  splash: (frame: number) => `splash.${frame}`,
+  cloud: (i: number) => `cloud.${i}`,
+  firefly: 'firefly',
+  /** A windmill's sails, which the scene turns about their hub (decision 68). */
+  sails: 'sails',
+  /** A scrap of confetti, or a spark of a firework, drawn white for the scene to colour (decision 64). */
+  confetti: 'confetti',
+  /** The heart over a mirling I pet (decision 65), and the puff of dust where one I dropped lands. */
+  heart: 'heart',
+  dust: 'dust',
   beacon: 'beacon',
   bubble: 'bubble',
   smoke: 'smoke',
@@ -87,10 +123,16 @@ export interface Art {
    * the end of its chute; and where on a trampoline's mat each of its two jumpers stands.
    */
   readonly playground: { swings: { pivots: Point[]; rope: number }; slide: { ladder: Point; top: Point; foot: Point }; trampoline: { spots: Point[] } };
+  /** Where light shines from at night, from the ground point of a lamp, a campfire, a house, a jack-o'-lantern, a workshop, a library, a lighthouse and an observatory. */
+  readonly lights: Record<'lamp' | 'campfire' | 'house' | 'pumpkin' | 'workshop' | 'library' | 'lighthouse' | 'observatory', Point>;
+  /** Where a windmill's sails turn, from its ground point, with the landmark at the buildings' scale (decision 68). */
+  readonly sailsAt: Point;
   /** Starts loading any files, for art that comes from a pack. */
   preload?(scene: Phaser.Scene): void;
-  /** Makes every named texture available to the scene. */
-  create(scene: Phaser.Scene): void;
+  /** Makes every named texture available to the scene, dressed for the season. */
+  create(scene: Phaser.Scene, season: Season): void;
+  /** Redraws what changes with the seasons, the grass, paths and trees, under the same names, so what shows them changes at once. */
+  dress(scene: Phaser.Scene, season: Season): void;
   /** The anchor of a building, tree, rail or playground picture; pictures without one stand on their bottom centre. */
   anchor(key: string): Anchor;
   /** The rock under the island, given the lowest ground pixel of each column; returns its texture name. */

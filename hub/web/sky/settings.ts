@@ -1,6 +1,6 @@
-// Settings (decisions 59 and 60): a panel under the top bar with each way Mira calls for me, switched
-// on or off on its own, and where Mira's own copy stands against the repo it was cloned from, with
-// the update to take when there is one. The switches belong to the notifier; this opens and closes
+// Settings (decisions 59 to 61): a panel under the top bar with each way Mira calls for me, switched
+// on or off on its own, what Mira costs the machine, and where Mira's own copy stands against the
+// repo it was cloned from, with the update to take when there is one. The switches belong to the notifier; this opens and closes
 // the panel and keeps the update part current.
 
 import type { UpdateStatus } from '../../src/update-status.ts';
@@ -32,7 +32,8 @@ const ago = (iso: string) => {
   return w === 'just now' ? w : `${w} ago`;
 };
 
-export function createSettings(els: SettingsElements): Settings {
+/** `onShow` hears the panel open and close, for what only measures while it's open. */
+export function createSettings(els: SettingsElements, onShow?: (open: boolean) => void): Settings {
   const { panel, toggle, chip, count, box } = els;
   let status: UpdateStatus | null = null;
   let checking = false;
@@ -53,6 +54,7 @@ export function createSettings(els: SettingsElements): Settings {
   function show(open: boolean) {
     panel.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
+    onShow?.(open);
     if (!open) return;
     render();
     place();

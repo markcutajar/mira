@@ -8,6 +8,7 @@ import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { WebSocket } from 'ws';
+import type { FootprintReport } from './footprint.ts';
 import { endpoint, hostFile, line, onLines, PAGE_MESSAGES, type FromHost, type TerminalSpec, type ToHost } from './terminal-protocol.ts';
 
 export type { TerminalSpec } from './terminal-protocol.ts';
@@ -43,6 +44,11 @@ export class Terminals {
   async type(id: string, text: string): Promise<boolean> {
     const reply = await ask(this.#home, { type: 'type', id, text });
     return reply?.type === 'typed' && reply.ok;
+  }
+
+  /** What the terminal host costs the machine (decision 61), or null when none runs. */
+  usage(): Promise<FootprintReport['terminals']> {
+    return terminalUsage(this.#home);
   }
 
   /** Relays a page to a session's terminal; `spec` says how to start it if it isn't running. */
@@ -114,17 +120,28 @@ export async function runningTerminals(home: string): Promise<string[] | null> {
   return reply?.type === 'list' ? reply.running : null;
 }
 
+/**
+ * What the terminal host costs the machine, or null when no host runs. A host started before it could
+ * measure itself doesn't answer, so it's only counted.
+ */
+export async function terminalUsage(home: string): Promise<FootprintReport['terminals']> {
+  const reply = await ask(home, { type: 'usage' }, 600);
+  if (reply?.type === 'usage') return { running: reply.running, usage: reply.usage };
+  const running = await runningTerminals(home);
+  return running ? { running: running.length } : null;
+}
+
 /** Ends the host and every terminal in it; resolves how many were running, or null if no host was. */
 export async function stopTerminalHost(home: string): Promise<number | null> {
   const reply = await ask(home, { type: 'shutdown' });
   return reply?.type === 'list' ? reply.running.length : null;
 }
 
-async function ask(home: string, message: ToHost): Promise<FromHost | null> {
+async function ask(home: string, message: ToHost, waitMs = 2000): Promise<FromHost | null> {
   const socket = await openHost(home);
   if (!socket) return null;
   return new Promise((done) => {
-    const timer = setTimeout(() => { socket.destroy(); done(null); }, 2000);
+    const timer = setTimeout(() => { socket.destroy(); done(null); }, waitMs);
     onLines(socket, (text) => {
       clearTimeout(timer);
       socket.end();

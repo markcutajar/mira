@@ -5,6 +5,7 @@
 import { createHash } from 'node:crypto';
 import type { Socket } from 'node:net';
 import { join, resolve } from 'node:path';
+import type { Usage } from './footprint.ts';
 import type { TerminalSpec } from './sources.ts';
 
 export type { TerminalSpec };
@@ -21,8 +22,10 @@ export type ToHost =
   | { type: 'shutdown' }
   /** Types my reply into a session's running terminal, then Enter (decision 57). */
   | { type: 'type'; id: string; text: string }
+  /** What the host costs the machine, for Settings (decision 61). */
+  | { type: 'usage' }
   | FromPage;
-export type FromHost = ToPage | { type: 'list'; running: string[] } | { type: 'typed'; ok: boolean };
+export type FromHost = ToPage | { type: 'list'; running: string[] } | { type: 'typed'; ok: boolean } | { type: 'usage'; running: number; usage: Usage };
 
 export const PAGE_MESSAGES = new Set<string>(['input', 'resize', 'start', 'stop']);
 

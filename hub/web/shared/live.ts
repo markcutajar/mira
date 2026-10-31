@@ -3,6 +3,7 @@
 // wait for an answer while someone is watching (decision 18).
 
 import type { MiraEvent } from '../../../contracts/src/index.ts';
+import type { Trips } from './acts.ts';
 import type { SectionLayout } from '../../src/layout.ts';
 import type { UpdateStatus } from '../../src/update-status.ts';
 import type { BoardSession, PendingPrompt } from './format.ts';
@@ -15,6 +16,8 @@ export interface SystemInfo {
   label?: string;
   /** Commits in the last 30 days, and the building levels they earn (decision 35). */
   growth?: { commits: number; docs: number; workshop: number; library: number };
+  /** Its trips in the last 30 days, for the paths its mirlings wear (decision 67). */
+  trips?: Trips;
 }
 
 export interface Live {

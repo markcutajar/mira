@@ -24,6 +24,20 @@ describe('Store', () => {
     store.close();
   });
 
+  it('counts each project\'s trips for the paths its mirlings wear, groups included (decision 67)', () => {
+    const store = new Store(':memory:', (stored) => (stored.startsWith('acme-') ? 'Acme' : stored));
+    let n = 0;
+    const add = (system: string, type: MiraEvent['type'], tool?: string, at = '2026-10-25T18:00:00.000Z') =>
+      store.add({ ...event(`00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`, at), system, type, ...(tool ? { detail: { tool } } : {}) });
+    for (const tool of ['Read', 'Grep', 'Edit', 'Bash', 'Agent']) add('mira', 'tool.started', tool);
+    add('mira', 'turn.ended');
+    add('mira', 'tool.started', 'Read', '2026-09-01T00:00:00.000Z'); // too long ago
+    add('acme-web', 'tool.started', 'Write');
+    add('acme-api', 'tool.started', 'Write');
+    assert.deepEqual(store.trips('2026-10-01T00:00:00.000Z'), { mira: { read: 2, make: 1, run: 1, turns: 1 }, Acme: { read: 0, make: 2, run: 0, turns: 0 } });
+    store.close();
+  });
+
   it("lists the folders a system's events named, most recent first", () => {
     const store = new Store(':memory:');
     const add = (n: number, cwd: string, second: number, type: MiraEvent['type'] = 'tool.started') =>
