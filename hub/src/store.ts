@@ -37,6 +37,9 @@ export class Store {
   #setSeat: StatementSync;
   #pruneSeats: StatementSync;
   #reads: StatementSync;
+  #board: StatementSync;
+  #clearBoard: StatementSync;
+  #place: StatementSync;
   #setRead: StatementSync;
   #pruneReads: StatementSync;
   #systemOf: (stored: string) => string;
@@ -71,6 +74,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS seats (session TEXT PRIMARY KEY, seat INTEGER NOT NULL, at TEXT NOT NULL);
       -- When I last read each session: what it called me for until then is read (decision 55).
       CREATE TABLE IF NOT EXISTS reads (session TEXT PRIMARY KEY, at TEXT NOT NULL);
+      -- The order I put the board's projects in, top first (decision 70).
+      CREATE TABLE IF NOT EXISTS board (system TEXT PRIMARY KEY, place INTEGER NOT NULL);
     `);
     this.#insert = this.#db.prepare('INSERT OR IGNORE INTO events (id, at, source, system, actor_id, type, status, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     this.#recent = this.#db.prepare('SELECT body FROM events ORDER BY seq DESC LIMIT ?');
@@ -98,6 +103,9 @@ export class Store {
     this.#setSeat = this.#db.prepare('INSERT INTO seats (session, seat, at) VALUES (?, ?, ?) ON CONFLICT (session) DO UPDATE SET seat = excluded.seat, at = excluded.at');
     this.#pruneSeats = this.#db.prepare('DELETE FROM seats WHERE at < ?');
     this.#reads = this.#db.prepare('SELECT session, at FROM reads');
+    this.#board = this.#db.prepare('SELECT system FROM board ORDER BY place');
+    this.#clearBoard = this.#db.prepare('DELETE FROM board');
+    this.#place = this.#db.prepare('INSERT INTO board (system, place) VALUES (?, ?)');
     this.#setRead = this.#db.prepare('INSERT INTO reads (session, at) VALUES (?, ?) ON CONFLICT (session) DO UPDATE SET at = excluded.at');
     this.#pruneReads = this.#db.prepare('DELETE FROM reads WHERE at < ?');
     this.#turns = this.#db.prepare("SELECT MIN(at) AS first, COUNT(*) AS n FROM events WHERE type = 'usage.reported'");
@@ -230,6 +238,23 @@ export class Store {
 
   setRead(session: string, at: string): void {
     this.#setRead.run(session, at);
+  }
+
+  /** The order I put the board's projects in, top first (decision 70). */
+  boardOrder(): string[] {
+    return this.#board.all().map((row) => String(row.system));
+  }
+
+  setBoardOrder(systems: string[]): void {
+    this.#db.exec('BEGIN');
+    try {
+      this.#clearBoard.run();
+      systems.forEach((system, place) => this.#place.run(system, place));
+      this.#db.exec('COMMIT');
+    } catch (err) {
+      this.#db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   /** When each project or session was removed from view, by key. */

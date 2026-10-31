@@ -16,6 +16,8 @@ export interface SystemInfo {
   label?: string;
   /** Commits in the last 30 days, and the building levels they earn (decision 35). */
   growth?: { commits: number; docs: number; workshop: number; library: number };
+  /** Where I put it on the board, top first, if I've placed it (decision 70). */
+  place?: number;
   /** Its trips in the last 30 days, for the paths its mirlings wear (decision 67). */
   trips?: Trips;
 }

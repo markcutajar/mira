@@ -84,7 +84,12 @@
   .proj.flash { animation: flash 1.4s ease-out; }
   @keyframes flash { from { background: rgba(255, 211, 77, 0.2); } to { background: transparent; } }
   .proj-head { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "name new menu" "meta new menu"; column-gap: 6px; align-items: center; }
-  .proj-name { all: unset; grid-area: name; cursor: pointer; font: 600 15px var(--font-display); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .proj-name { all: unset; grid-area: name; cursor: pointer; font: 600 15px var(--font-display); text-transform: lowercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Dragging a project to its place on the board (decision 70): a line shows where it will go. */
+  .proj-head[draggable="true"] { cursor: grab; }
+  .proj.dragging { opacity: 0.45; }
+  .proj.drop-before { box-shadow: inset 0 2px 0 var(--thronglet); }
+  .proj.drop-after { box-shadow: inset 0 -2px 0 var(--thronglet); }
   .proj-name:hover { color: var(--thronglet); }
   .proj-name:focus-visible { outline: 2px solid var(--thronglet); outline-offset: 2px; }
   .proj.quiet .proj-name { color: var(--dim); font-size: 13px; }

@@ -14,7 +14,7 @@ describe('Claude Code source', () => {
   after(() => rmSync(dir, { recursive: true, force: true }));
   const transcript = writeSession(dir);
   const source = claudeCode({ projectsDir: dir, placeFor: () => ({ system: 'mira' }), costOf: makeCostOf(), usageDelayMs: 0 });
-  const session = (t: string): SessionView => ({ id: 's-1', source: 'claude-code', system: 'mira', status: 'my-turn', lastAt: '2026-10-25T18:00:31.000Z', transcript: t, seenIn: 'events', subagents: [] });
+  const session = (t: string): SessionView => ({ id: 's-1', source: 'claude-code', system: 'mira', status: 'my-turn', startedAt: '2026-10-25T18:00:00.000Z', lastAt: '2026-10-25T18:00:31.000Z', transcript: t, seenIn: 'events', subagents: [] });
 
   it('reports token use for every finished turn it missed, once each', () => {
     const events = source.catchUp?.(0) ?? [];

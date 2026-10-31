@@ -1,8 +1,9 @@
 // The board, condensed down the left of the sky (decision 31): what's waiting for me, then every
 // project with its sessions and, folded away, its earlier conversations (decision 40). A session row
-// flies to its mirling and opens its story.
+// flies to its mirling and opens its story. Projects stay in the order I put them in, by dragging one
+// or from its ⋯ menu, and sessions in the order they started, so nothing moves on its own (decision 70).
 
-import { ago, answerPrompt, cost, esc, folder, markRead, projectLabel, sessionLabel, short, statusLabel, waited, when, type BoardSession, type PendingPrompt } from '../shared/format.ts';
+import { ago, answerPrompt, cost, esc, folder, markRead, projectLabel, sessionLabel, short, statusLabel, toast, waited, when, type BoardSession, type PendingPrompt } from '../shared/format.ts';
 import type { Live } from '../shared/live.ts';
 import { doneWith, removeThing, renameThing } from '../shared/manage.ts';
 import { openStart } from '../shared/start.ts';
@@ -48,8 +49,6 @@ interface Fold {
 
 const EARLIER_PAGE = 20;
 
-const ORDER = ['needs-me', 'failed', 'my-turn', 'working', 'waiting', 'ended', null];
-const rank = (s?: BoardSession) => ORDER.indexOf(s?.status ?? null);
 
 export function createSidebar(root: HTMLElement, options: SidebarOptions): Sidebar {
   const { live } = options;
@@ -57,8 +56,11 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
   const busy = new Set<string>(); // prompts being answered
   const earlier = new Map<string, Fold>(); // projects whose earlier conversations are unfolded
   let last = '';
+  // The project being dragged to a new place, during which the board isn't drawn again under it.
+  let dragging: string | null = null;
 
   function render() {
+    if (dragging) return;
     for (const [system, fold] of earlier) if (!fold.loading && fold.live !== liveIn(system)) void loadEarlier(system);
     const html = promptsHTML() + projectsHTML();
     if (html === last) return tick();
@@ -88,19 +90,39 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
     </article>`;
   }
 
-  // Projects with sessions first, the one needing me most at the top; quiet projects after.
-  function projectsHTML(): string {
+  // Projects in the order I put them in, then any I haven't placed, in the order they first appeared,
+  // as on the island, so a new one joins at the bottom (decision 70).
+  function ordered(): string[] {
     const names = [...new Set([...live.systems.map((s) => s.name), ...live.sessions.map((s) => s.system)])];
-    const groups = names.map((name) => ({
-      name,
-      sessions: live.sessions.filter((s) => s.system === name).sort((a, b) => rank(a) - rank(b) || b.lastAt.localeCompare(a.lastAt)),
-    }));
-    groups.sort((a, b) => {
-      if (!a.sessions.length || !b.sessions.length) return Number(!a.sessions.length) - Number(!b.sessions.length);
-      return rank(a.sessions[0]) - rank(b.sessions[0]) || (b.sessions[0]?.lastAt ?? '').localeCompare(a.sessions[0]?.lastAt ?? '');
-    });
-    if (!groups.length) return '<p class="hint side-empty">No projects yet. Start a Claude Code session in any repo and it appears here, and on the island.</p>';
-    return groups.map(({ name, sessions }) => projectHTML(name, sessions)).join('');
+    const place = (name: string) => live.systems.find((s) => s.name === name)?.place ?? Infinity;
+    return names.map((name, i) => ({ name, i })).sort((a, b) => place(a.name) - place(b.name) || a.i - b.i).map((p) => p.name);
+  }
+
+  // Each project's sessions in the order they started, newest at the bottom.
+  function projectsHTML(): string {
+    const names = ordered();
+    if (!names.length) return '<p class="hint side-empty">No projects yet. Start a Claude Code session in any repo and it appears here, and on the island.</p>';
+    return names.map((name) => projectHTML(name, live.sessions.filter((s) => s.system === name).sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id)))).join('');
+  }
+
+  /** Puts the projects in a new order, here at once and on the hub for every page. */
+  function reorder(names: string[]) {
+    for (const s of live.systems) {
+      const place = names.indexOf(s.name);
+      if (place >= 0) s.place = place;
+    }
+    render();
+    void fetch('/api/board/order', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ systems: names }) })
+      .then(async (res) => { if (!res.ok) toast((await res.text()) || `The hub couldn't keep that order (${res.status}).`); })
+      .catch(() => toast("The hub isn't reachable, so that order wasn't kept."));
+  }
+
+  /** Moves a project to sit before another, or to the bottom. */
+  function moveProject(name: string, before: string | null) {
+    const names = ordered().filter((n) => n !== name);
+    const at = before === null ? names.length : names.indexOf(before);
+    names.splice(at < 0 ? names.length : at, 0, name);
+    reorder(names);
   }
 
   function projectHTML(system: string, sessions: BoardSession[]): string {
@@ -113,13 +135,13 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
     const meta = [sessions.length ? `${active} active` : 'quiet', spent ? cost(spent) : '', made, needs ? `<span class="needs">${needs} need${needs === 1 ? 's' : ''} you</span>` : ''].filter(Boolean).join(' · ');
     const open = menus.has(system);
     return `<section class="proj${sessions.length ? '' : ' quiet'}" data-project="${esc(system)}">
-      <header class="proj-head">
+      <header class="proj-head" draggable="true" title="Drag to move ${esc(label)} up or down">
         <button type="button" class="proj-name" data-focus-project="${esc(system)}" title="${esc(label !== system ? `${label} (${system})` : label)}: show on the island">${esc(label)}</button>
         <span class="proj-meta">${meta}</span>
         <button type="button" class="ghost small" data-start="${esc(system)}" title="Start a new Claude Code session in ${esc(label)}, in VS Code">+ New</button>
         <button type="button" class="ghost small" data-menu="${esc(system)}" aria-expanded="${open}" aria-label="More for ${esc(label)}">⋯</button>
       </header>
-      ${open ? `<div class="proj-menu"><button type="button" class="ghost small" data-rename-system="${esc(system)}">Rename</button><button type="button" class="ghost small" data-remove-system="${esc(system)}">Remove</button></div>` : ''}
+      ${open ? `<div class="proj-menu"><button type="button" class="ghost small" data-move-up="${esc(system)}">Move up</button><button type="button" class="ghost small" data-move-down="${esc(system)}">Move down</button><button type="button" class="ghost small" data-rename-system="${esc(system)}">Rename</button><button type="button" class="ghost small" data-remove-system="${esc(system)}">Remove</button></div>` : ''}
       ${sessions.length ? `<ul class="rows">${sessions.map(rowHTML).join('')}</ul>` : ''}
       ${earlierHTML(system)}
     </section>`;
@@ -269,6 +291,15 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
         if (s && !live.sessions.includes(s)) void loadEarlier(s.system);
       });
     }
+    const up = pick('move-up') ?? pick('move-down');
+    if (up) {
+      const names = ordered();
+      const i = names.indexOf(up);
+      const j = pick('move-up') ? i - 1 : i + 1;
+      if (i < 0 || j < 0 || j >= names.length) return;
+      [names[i], names[j]] = [names[j] as string, names[i] as string];
+      return reorder(names);
+    }
     const rename = pick('rename-system');
     if (rename) return void renameThing('system', rename, projectLabel(rename, live.systems));
     const remove = pick('remove-system');
@@ -278,6 +309,48 @@ export function createSidebar(root: HTMLElement, options: SidebarOptions): Sideb
         menus.delete(remove);
       });
     }
+  });
+
+  // Dragging a project's heading moves it: a line shows where it will go, above or below the project
+  // under the pointer.
+  const marks = () => root.querySelectorAll('.drop-before, .drop-after');
+  const where = (e: DragEvent) => {
+    const over = (e.target as HTMLElement).closest<HTMLElement>('.proj[data-project]');
+    if (!over || !dragging || over.dataset.project === dragging) return null;
+    const box = over.getBoundingClientRect();
+    return { over, after: e.clientY > box.top + box.height / 2 };
+  };
+  root.addEventListener('dragstart', (e) => {
+    const head = (e.target as HTMLElement).closest<HTMLElement>('.proj-head');
+    const section = head?.closest<HTMLElement>('.proj[data-project]');
+    if (!head || !section?.dataset.project) return;
+    dragging = section.dataset.project;
+    section.classList.add('dragging');
+    e.dataTransfer?.setData('text/plain', dragging);
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+  });
+  root.addEventListener('dragover', (e) => {
+    const spot = where(e);
+    if (!spot) return;
+    e.preventDefault();
+    for (const el of marks()) el.classList.remove('drop-before', 'drop-after');
+    spot.over.classList.add(spot.after ? 'drop-after' : 'drop-before');
+  });
+  root.addEventListener('drop', (e) => {
+    const spot = where(e);
+    const moving = dragging;
+    if (!spot || !moving) return;
+    e.preventDefault();
+    const names = ordered().filter((n) => n !== moving);
+    const at = names.indexOf(spot.over.dataset.project as string) + (spot.after ? 1 : 0);
+    dragging = null;
+    moveProject(moving, names[at] ?? null);
+  });
+  root.addEventListener('dragend', () => {
+    dragging = null;
+    for (const el of marks()) el.classList.remove('drop-before', 'drop-after');
+    last = '';
+    render();
   });
 
   return {

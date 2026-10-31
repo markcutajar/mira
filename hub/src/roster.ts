@@ -26,6 +26,8 @@ export interface SessionView {
   source: string;
   system: string;
   status: Status | null;
+  /** When Mira first heard from it, which keeps its place on the board (decision 70). */
+  startedAt: string;
   lastAt: string;
   cwd?: string;
   transcript?: string;
@@ -173,6 +175,6 @@ export class Roster {
   }
 
   #blank(id: string, source: string, system: string, at: string): Session {
-    return { id, source, system, status: null, statusAt: '', lastAt: at, seenIn: 'events', endedTurns: [], subagents: new Map() };
+    return { id, source, system, status: null, statusAt: '', startedAt: at, lastAt: at, seenIn: 'events', endedTurns: [], subagents: new Map() };
   }
 }

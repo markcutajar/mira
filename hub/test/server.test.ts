@@ -357,6 +357,16 @@ describe('hub server', () => {
     }
   });
 
+  it("keeps the board's projects in the order I put them in (decision 70)", async () => {
+    const put = (body: unknown) => fetch(`${base}/api/board/order`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal((await put({ systems: 'mira' })).status, 400);
+    assert.equal((await put({ systems: ['elsewhere', 'mira'] })).status, 204);
+    const listed = (await (await fetch(`${base}/api/systems`)).json()) as { systems: Array<{ name: string; place?: number }> };
+    assert.equal(listed.systems.find((s) => s.name === 'mira')?.place, 1);
+    const { sessions: live } = await sessions();
+    assert.ok(live.every((s) => typeof (s as { startedAt?: string }).startedAt === 'string'));
+  });
+
   it('says what the hub and the terminal host cost the machine', async () => {
     const report = (await (await fetch(`${base}/api/footprint`)).json()) as FootprintReport;
     assert.ok(report.hub.cpu >= 0 && report.hub.cpu <= 1);

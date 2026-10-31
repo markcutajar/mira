@@ -179,13 +179,27 @@ export function createHub(options: HubOptions) {
     return trips;
   };
 
+  // The board's projects stay where I put them (decision 70): each carries its place in my order.
+  let order = store.boardOrder();
   const systems = () => store.systems(new Date(Date.now() - SYSTEMS_DAYS * 86_400_000).toISOString())
     .filter((s) => s.name !== 'unknown' && !gone('system', s.name, s.lastAt))
     .map((s) => {
       const growth = options.growth?.get(s.name);
       const worn = tripsNow()[s.name];
-      return { ...s, ...(names.system[s.name] ? { label: names.system[s.name] } : {}), ...(growth ? { growth } : {}), ...(worn ? { trips: worn } : {}) };
+      const place = order.indexOf(s.name);
+      return { ...s, ...(names.system[s.name] ? { label: names.system[s.name] } : {}), ...(growth ? { growth } : {}), ...(worn ? { trips: worn } : {}), ...(place >= 0 ? { place } : {}) };
     });
+
+  async function reorder(req: IncomingMessage, res: ServerResponse) {
+    const given = parseObject(await readBody(req))?.systems;
+    if (!Array.isArray(given) || given.length > 500 || !given.every((s) => typeof s === 'string' && s.length > 0 && s.length <= 240)) {
+      return reply(res, 400, 'Expected { systems }, the projects in order, top first.');
+    }
+    order = [...new Set(given as string[])];
+    store.setBoardOrder(order);
+    res.writeHead(204).end();
+    broadcast('systems', systems());
+  }
 
   function record(event: MiraEvent | null) {
     if (!event || !store.add(event)) return;
@@ -461,6 +475,7 @@ export function createHub(options: HubOptions) {
     if (route === 'GET /api/systems') return json(res, { systems: systems() });
     if (route === 'GET /api/layouts') return json(res, { layouts });
     if (layoutOf) return void arrange(req, res, decodeName(layoutOf));
+    if (route === 'PUT /api/board/order') return void reorder(req, res);
     if (manage) return void change(req, res, manage[1] as 'names' | 'remove', manage[2] as Kind, decodeName(manage[3] as string));
     const served = req.method === 'GET' ? webFile(url.pathname) : undefined;
     if (served) return void serveWeb(res, served);
