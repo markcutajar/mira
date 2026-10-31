@@ -5,6 +5,7 @@
 // frames to these names in `create` (scene.textures can add frames under any key), and give each
 // building-like picture an anchor. Then pass it to the scene instead of `drawnArt()`.
 
+import type { Season } from './daylight.ts';
 import type { Palette } from './mirling.ts';
 import type { HouseStyle } from './world.ts';
 
@@ -13,8 +14,9 @@ export type Accent = 'y' | 'l' | 'o' | 'c' | 'p' | 'g';
 export const ACCENTS: Accent[] = ['y', 'c', 'l', 'o', 'p', 'g'];
 export const ACCENT_COLOUR: Record<Accent, string> = { y: '#ffd34d', l: '#c8a6ff', o: '#ff8a3d', c: '#6ff3ff', p: '#ff9ec7', g: '#9be36b' };
 
-export type Frame = 'a' | 'b';
-export type { HouseStyle, Palette };
+/** A mirling's two walking frames, and asleep (decision 62). */
+export type Frame = 'a' | 'b' | 'asleep';
+export type { HouseStyle, Palette, Season };
 /** Ground tiles; a bridge's deck has its planks across the way it's crossed. */
 export type TileKind = 'grass0' | 'grass1' | 'grass2' | 'flowers' | 'path' | 'water' | 'deck-c' | 'deck-r';
 export type Decoration =
@@ -54,7 +56,16 @@ export const names = {
   /** The tile under the pointer in build mode: green where the tool can work, red where it can't. */
   cursor: (ok: boolean) => (ok ? 'cursor.ok' : 'cursor.bad'),
   creature: (palette: Palette, frame: Frame) => `creature.${palette}.${frame}`,
-  helper: (palette: Palette, frame: Frame) => `helper.${palette}.${frame}`,
+  helper: (palette: Palette, frame: 'a' | 'b') => `helper.${palette}.${frame}`,
+  /** The glow of a light at night (decision 62), laid over the island: warm lamplight, or a flickering fire. */
+  glow: (kind: 'warm' | 'fire') => `glow.${kind}`,
+  /** What the seasons bring: a jack-o'-lantern, a snowman, and what falls from the sky, one pixel or two. */
+  seasonal: (kind: 'pumpkin' | 'snowman') => `seasonal.${kind}`,
+  flake: (kind: 'snow' | 'leaf' | 'petal') => `flake.${kind}`,
+  /** Mira, the star, in the sky behind the island. */
+  star: 'star.mira',
+  /** The z's rising from a sleeping mirling. */
+  zzz: 'zzz',
   beacon: 'beacon',
   bubble: 'bubble',
   smoke: 'smoke',
@@ -87,10 +98,14 @@ export interface Art {
    * the end of its chute; and where on a trampoline's mat each of its two jumpers stands.
    */
   readonly playground: { swings: { pivots: Point[]; rope: number }; slide: { ladder: Point; top: Point; foot: Point }; trampoline: { spots: Point[] } };
+  /** Where light shines from at night, from the ground point of a lamp, a campfire, a house, a jack-o'-lantern, a workshop and a library. */
+  readonly lights: Record<'lamp' | 'campfire' | 'house' | 'pumpkin' | 'workshop' | 'library', Point>;
   /** Starts loading any files, for art that comes from a pack. */
   preload?(scene: Phaser.Scene): void;
-  /** Makes every named texture available to the scene. */
-  create(scene: Phaser.Scene): void;
+  /** Makes every named texture available to the scene, dressed for the season. */
+  create(scene: Phaser.Scene, season: Season): void;
+  /** Redraws what changes with the seasons, the grass, paths and trees, under the same names, so what shows them changes at once. */
+  dress(scene: Phaser.Scene, season: Season): void;
   /** The anchor of a building, tree, rail or playground picture; pictures without one stand on their bottom centre. */
   anchor(key: string): Anchor;
   /** The rock under the island, given the lowest ground pixel of each column; returns its texture name. */

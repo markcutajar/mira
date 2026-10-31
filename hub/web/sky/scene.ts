@@ -6,6 +6,7 @@ import type { MiraEvent } from '../../../contracts/src/index.ts';
 import { sessionLabel, type BoardSession } from '../shared/format.ts';
 import { ACCENT_COLOUR, ACCENTS, MAX_LEVEL, names, WATERFALL_FRAMES, type Accent, type Art, type Decoration, type Edge, type HouseStyle, type Palette } from './art.ts';
 import { arrange, BUILDING_LABEL, destinations, edit, isItem, isPiece, ITEMS, move, movePiece, onWater, pieceAt, PIECES, placeOf, restyle, sameLayouts, unreachable, type ItemKind, type Outcome, type PieceKind, type Placed, type SectionLayout, type Tool, type Where } from './build.ts';
+import { daylightAt, halloween, miraStar, seasonOf, type Daylight, type Season } from './daylight.ts';
 import { findPath, generateCells, hash, SEC, sectionOrigin, spotsAround, type BuildingType, type Cell, type Spot, type Template } from './world.ts';
 
 type Status = 'working' | 'waiting' | 'needs-me' | 'my-turn' | 'failed' | 'ended';
@@ -114,6 +115,8 @@ interface Mirling {
   aloft: boolean;
   /** Drawn at this depth instead of its own while on the playground. */
   depth?: number;
+  /** Asleep by its home: it's bedtime, and nothing for it to do until I reply (decision 62). */
+  asleep?: boolean;
   /** Tweens and timers of what it's doing now, stopped when that changes. */
   later: Array<{ remove(): unknown }>;
   /** Waiting to see whether a finished tool is followed by another or by thinking. */
@@ -137,6 +140,8 @@ export interface SkyOptions {
   onLayout?(name: string, layout: SectionLayout): void;
   /** What build mode has to say: what the tool does, or why a click didn't work. */
   onBuildHint?(text: string): void;
+  /** The time the island shows (decision 62): the machine's clock, unless the page asks for another to try it out. */
+  now?(): Date;
 }
 
 /** A tile of the island as build mode sees it: whose layout it's in, and where. */
@@ -171,6 +176,19 @@ const actFor = (tool: string | null): Act => (!tool || DIRECTING.has(tool) ? 'th
 // A pause this long after a tool finishes, with no other started, is thinking.
 const THINK_AFTER_MS = 1500;
 const POND_FLOATERS = 5;
+// How often the island looks at the clock, for the light, the lamps and the season (decision 62).
+const SKY_EVERY_MS = 2000;
+// The side of the square of stars that repeats across the sky, in pixels.
+const STAR_TILE = 1024;
+// Glows at night: how big each light is drawn, and how strongly it shines.
+const LIGHT: Record<'lamp' | 'campfire' | 'house' | 'pumpkin' | 'workshop' | 'library', { kind: 'warm' | 'fire'; scale: number; strength: number }> = {
+  lamp: { kind: 'warm', scale: 1.1, strength: 0.9 },
+  campfire: { kind: 'fire', scale: 1.4, strength: 1 },
+  house: { kind: 'warm', scale: 0.9, strength: 0.55 },
+  pumpkin: { kind: 'fire', scale: 0.5, strength: 0.8 },
+  workshop: { kind: 'warm', scale: 1, strength: 0.3 },
+  library: { kind: 'warm', scale: 1, strength: 0.3 },
+};
 // Water lies this many art pixels below the ground, so streams and ponds have banks.
 const WATER_DROP = 3;
 const SLIDERS = 2;
@@ -216,6 +234,24 @@ export class SkyScene extends Phaser.Scene {
   #undo: Array<{ name: string; layout: SectionLayout | undefined }> = [];
   #cursor!: Image;
   #ghost!: Image;
+  // Day, night and the seasons (decision 62). The sky behind the island and what goes over it, marks,
+  // labels and lights, have cameras of their own, so night shades the island alone.
+  #backCam!: Phaser.Cameras.Scene2D.Camera;
+  #overCam!: Phaser.Cameras.Scene2D.Camera;
+  #shade: Phaser.FX.ColorMatrix | null = null;
+  #daylight: Daylight = { tint: [1, 1, 1], night: 0, asleep: false };
+  #season: Season = 'summer';
+  #pumpkins = false;
+  #skyAt = -Infinity;
+  #nightSky!: Phaser.GameObjects.TileSprite;
+  #mira!: Image;
+  #miraSays = '';
+  #pointedAtMira = false;
+  /** Where Mira the star shows on screen, and how bright, worked out with the rest of the sky every few seconds. */
+  #miraAt = { x: 0, y: 0, brightness: 0 };
+  #lights: Array<{ img: Image; fire: boolean; strength: number; phase: number }> = [];
+  #visitors: Image[] = [];
+  #falling: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
 
   constructor(options: SkyOptions) {
     super({ key: 'sky' });
@@ -370,8 +406,20 @@ export class SkyScene extends Phaser.Scene {
   }
 
   create(): void {
+    const main = this.cameras.main;
+    this.#backCam = this.cameras.add(0, 0, main.width, main.height, false, 'sky');
+    this.#overCam = this.cameras.add(0, 0, main.width, main.height, false, 'over');
+    // The sky is drawn first, then the island, then what goes over it.
+    const order = this.cameras.cameras;
+    order.splice(order.indexOf(this.#backCam), 1);
+    order.unshift(this.#backCam);
+    // Everything is part of the island unless it's put in the sky or over the island.
+    this.events.on(Phaser.Scenes.Events.ADDED_TO_SCENE, (obj: Phaser.GameObjects.GameObject) => { obj.cameraFilter = this.#backCam.id | this.#overCam.id; });
+    const now = this.#now();
+    this.#season = seasonOf(now);
+    this.#pumpkins = halloween(now);
     const before = new Set(this.textures.getTextureKeys());
-    this.#art.create(this);
+    this.#art.create(this, this.#season);
     for (const key of this.textures.getTextureKeys()) if (!before.has(key)) this.#artKeys.add(key);
     this.#drawBackdrop();
     this.#selectMark = this.add.image(0, 0, names.select).setVisible(false);
@@ -385,7 +433,40 @@ export class SkyScene extends Phaser.Scene {
     if (this.#pending) this.#apply();
   }
 
+  /** Looks at the clock again now, say when it's been switched on or off (decision 62). */
+  lookAtClock(): void {
+    this.#skyAt = -Infinity;
+  }
+
+  /** The time the island shows (decision 62). */
+  #now(): Date {
+    return this.#options.now?.() ?? new Date();
+  }
+
+  /** Shows a picture over the island, which night doesn't shade: a mark, a label or a light. */
+  #overIsland<T extends Phaser.GameObjects.GameObject>(obj: T): T {
+    obj.cameraFilter = this.cameras.main.id | this.#backCam.id;
+    return obj;
+  }
+
+  /** Puts a picture in the sky behind the island. */
+  #inSky<T extends Phaser.GameObjects.GameObject>(obj: T): T {
+    obj.cameraFilter = this.cameras.main.id | this.#overCam.id;
+    return obj;
+  }
+
   update(time: number, delta: number): void {
+    const main = this.cameras.main;
+    for (const cam of [this.#backCam, this.#overCam]) cam.setZoom(main.zoom).setScroll(main.scrollX, main.scrollY);
+    if (time - this.#skyAt >= SKY_EVERY_MS) {
+      this.#skyAt = time;
+      this.#updateSky();
+    }
+    this.#placeMira(time);
+    for (const light of this.#lights) {
+      if (!light.fire || !light.img.visible || reduceMotion) continue;
+      light.img.setAlpha(this.#daylight.night * light.strength * (0.82 + 0.18 * Math.sin(time / 90 + light.phase * 7) * Math.sin(time / 230 + light.phase * 3)));
+    }
     const zoom = this.cameras.main.zoom;
     const d = DPR();
     const follow = Math.min(1, delta * 0.004);
@@ -410,7 +491,7 @@ export class SkyScene extends Phaser.Scene {
     const overHead = (col: Mirling) => Math.round(col.pos.y) - creature - (col.marks.beacon ? 22 * d / zoom + 4 * A : 4 * A);
     for (const col of this.#mirlings.values()) {
       const beat = Math.floor(time / 170 + col.phase * 2) % 2;
-      const key = names.creature(col.palette, col.moving && beat ? 'b' : 'a');
+      const key = names.creature(col.palette, col.asleep ? 'asleep' : col.moving && beat ? 'b' : 'a');
       if (col.sprite.texture.key !== key) col.sprite.setTexture(key);
       const x = Math.round(col.pos.x);
       let y = Math.round(col.pos.y) - (col.moving && beat && !reduceMotion ? A : 0);
@@ -446,10 +527,14 @@ export class SkyScene extends Phaser.Scene {
     }
     if (selected) this.#selectMark.setPosition(Math.round(selected.pos.x), Math.round(selected.pos.y)).setDepth(selected.pos.y - 0.5);
     this.#hoverLabel.setVisible(Boolean(labelled || building));
+    this.#hoverLabel.setOrigin(0.5, 1);
     if (labelled) {
       this.#hoverLabel.setText(labelled.name ? `${labelled.name} · ${labelled.title}` : labelled.title).setScale(ui).setPosition(Math.round(labelled.pos.x), overHead(labelled));
     } else if (building) {
       this.#hoverLabel.setText(this.#buildingSays(building)).setScale(ui).setPosition(building.x, building.top - 2 * A);
+    } else if (this.#pointedAtMira) {
+      // To the star's left, since it sits by the edge of the screen.
+      this.#hoverLabel.setVisible(true).setText(this.#miraSays).setOrigin(1, 0.5).setScale(ui).setPosition(this.#mira.x - this.#mira.displayWidth, this.#mira.y);
     }
     for (const sec of this.#sections) {
       sec.summary.setScale(ui).setPosition(sec.anchor.x, sec.anchor.y);
@@ -546,6 +631,7 @@ export class SkyScene extends Phaser.Scene {
     this.#computeFit();
     this.#computeZoomLevels();
     this.#setZoom(0, undefined, from === 0);
+    this.#dressIsland();
   }
 
   #syncMirlings(sessions: BoardSession[]): void {
@@ -728,7 +814,7 @@ export class SkyScene extends Phaser.Scene {
   }
 
   #label(text: string, style: Phaser.Types.GameObjects.Text.TextStyle): Text {
-    const t = this.add.text(0, 0, text, { resolution: DPR(), ...style }).setOrigin(0.5, 1).setDepth(600000);
+    const t = this.#overIsland(this.add.text(0, 0, text, { resolution: DPR(), ...style }).setOrigin(0.5, 1).setDepth(600000));
     t.texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
     return t;
   }
@@ -879,7 +965,7 @@ export class SkyScene extends Phaser.Scene {
     col.act = act;
     col.work = work;
     if (act === 'think') {
-      col.gear.thought = this.add.image(col.pos.x, col.pos.y, names.thought(0)).setOrigin(0.5, 1).setDepth(500000);
+      col.gear.thought = this.#overIsland(this.add.image(col.pos.x, col.pos.y, names.thought(0)).setOrigin(0.5, 1).setDepth(500000));
       return this.#ponder(col);
     }
     this.#walkTo(col, pickOne(this.#workSpots(work)), () => this.#atWork(col));
@@ -929,7 +1015,7 @@ export class SkyScene extends Phaser.Scene {
   /** Watches the workshop's console, with an hourglass over its head, until the work it started reports back. */
   #wait(col: Mirling): void {
     col.work = this.#workFor(col.sec, 'Bash');
-    col.gear.hourglass = this.add.image(col.pos.x, col.pos.y, names.hourglass(0)).setOrigin(0.5, 1).setDepth(500000);
+    col.gear.hourglass = this.#overIsland(this.add.image(col.pos.x, col.pos.y, names.hourglass(0)).setOrigin(0.5, 1).setDepth(500000));
     this.#walkTo(col, pickOne(this.#workSpots(col.work)), () => {
       if (col.status !== 'waiting' || col.removed) return;
       col.act = 'run';
@@ -952,10 +1038,11 @@ export class SkyScene extends Phaser.Scene {
     }, 1.7);
   }
 
-  /** Stops working or playing: puts its things away and gives up its place on the playground; it hops down when it next walks. */
+  /** Stops working, playing or sleeping: puts its things away and gives up its place on the playground; it hops down when it next walks. */
   #stopActing(col: Mirling): void {
     for (const thing of col.later) thing.remove();
     col.later = [];
+    col.asleep = false;
     this.#putDown(col);
     col.gear.thought?.destroy();
     col.gear.hourglass?.destroy();
@@ -975,8 +1062,9 @@ export class SkyScene extends Phaser.Scene {
 
   // -- waiting for me (decision 41) --
 
-  /** Picks something to play at: a free swing, a slide, a trampoline or the pond, and now and then something else. */
+  /** Picks something to play at: a free swing, a slide, a trampoline or the pond, and now and then something else; at bedtime it sleeps. */
   #chill(col: Mirling): void {
+    if (this.#daylight.asleep) return this.#sleep(col);
     const pg = col.sec.play;
     const choices: Array<() => void> = [];
     for (const sw of pg.swings) {
@@ -993,6 +1081,25 @@ export class SkyScene extends Phaser.Scene {
       this.#stopActing(col);
       this.#chill(col);
     }));
+  }
+
+  /** Goes home and sleeps by its door, z's rising, until morning or my reply (decision 62). */
+  #sleep(col: Mirling): void {
+    this.#walkTo(col, col.home.door, () => {
+      if (col.status !== 'my-turn' || col.removed || !this.#daylight.asleep) return;
+      col.asleep = true;
+      col.facing = col.home.x < col.pos.x ? -1 : 1;
+      if (reduceMotion) return;
+      const A = this.#art.scale;
+      this.#track(col, this.time.addEvent({
+        delay: 1400,
+        loop: true,
+        callback: () => {
+          const z = this.#overIsland(this.add.image(col.pos.x - col.facing * 4 * A, col.pos.y - this.#art.sizes.creature, names.zzz).setOrigin(0.5, 1).setDepth(500000).setScale(0.6));
+          this.tweens.add({ targets: z, x: z.x - col.facing * 5 * A, y: z.y - 10 * A, scale: 1.1, alpha: 0, duration: 2200, onComplete: () => z.destroy() });
+        },
+      }));
+    });
   }
 
   // The tiles beside a playground piece, nearest a point first.
@@ -1149,15 +1256,15 @@ export class SkyScene extends Phaser.Scene {
 
   #addBeacon(col: Mirling): void {
     const A = this.#art.scale;
-    const img = this.add.image(col.pos.x, col.pos.y, names.beacon).setOrigin(0.5, 1).setDepth(500002);
-    const ring = this.add.circle(col.pos.x, col.pos.y, 5 * A).setStrokeStyle(A, 0xff8a3d).setDepth(500001);
+    const img = this.#overIsland(this.add.image(col.pos.x, col.pos.y, names.beacon).setOrigin(0.5, 1).setDepth(500002));
+    const ring = this.#overIsland(this.add.circle(col.pos.x, col.pos.y, 5 * A).setStrokeStyle(A, 0xff8a3d).setDepth(500001));
     const pulse = { t: 0 };
     if (!reduceMotion) this.tweens.add({ targets: pulse, t: 1, duration: 1100, repeat: -1 });
     col.marks.beacon = { img, ring, pulse };
   }
 
   #setClash(col: Mirling, on: boolean): void {
-    if (on && !col.clash) col.clash = this.add.image(col.pos.x, col.pos.y, names.clash(0)).setOrigin(0.5, 1).setDepth(500003);
+    if (on && !col.clash) col.clash = this.#overIsland(this.add.image(col.pos.x, col.pos.y, names.clash(0)).setOrigin(0.5, 1).setDepth(500003));
     if (!on && col.clash) {
       col.clash.destroy();
       delete col.clash;
@@ -1165,7 +1272,7 @@ export class SkyScene extends Phaser.Scene {
   }
 
   #addBubble(col: Mirling): void {
-    col.marks.bubble = this.add.image(col.pos.x, col.pos.y, names.bubble).setOrigin(0.5, 1).setDepth(500000);
+    col.marks.bubble = this.#overIsland(this.add.image(col.pos.x, col.pos.y, names.bubble).setOrigin(0.5, 1).setDepth(500000));
   }
 
   #addSmoke(col: Mirling): void {
@@ -1200,8 +1307,8 @@ export class SkyScene extends Phaser.Scene {
   #floatAt(x: number, y: number, text: string, color = '#ffd34d'): void {
     if (reduceMotion) return;
     const A = this.#art.scale;
-    const label = this.add.text(x, y, text, { fontFamily: '"IBM Plex Mono", monospace', fontSize: '12px', color, resolution: DPR() })
-      .setOrigin(0.5, 1).setDepth(600001).setScale(DPR() / this.cameras.main.zoom);
+    const label = this.#overIsland(this.add.text(x, y, text, { fontFamily: '"IBM Plex Mono", monospace', fontSize: '12px', color, resolution: DPR() })
+      .setOrigin(0.5, 1).setDepth(600001).setScale(DPR() / this.cameras.main.zoom));
     label.texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
     this.tweens.add({ targets: label, y: label.y - 14 * A, alpha: 0, duration: 1600, onComplete: () => label.destroy() });
   }
@@ -1259,19 +1366,182 @@ export class SkyScene extends Phaser.Scene {
         ctx.fillRect(0, 0, 64, 64);
         this.textures.addCanvas(key, canvas);
       }
-      this.add.image(x * A, y * A, key).setScale(s * A).setScrollFactor(0.15).setDepth(-1000001);
+      this.#inSky(this.add.image(x * A, y * A, key).setScale(s * A).setScrollFactor(0.15).setDepth(-1000001));
     }
-    const field = this.add.graphics().setScrollFactor(0.3).setDepth(-1000000);
-    for (let i = 0; i < 1600; i++) {
-      field.fillStyle(stars[Math.floor(rnd() * stars.length)] as number, 0.35 + rnd() * 0.65);
-      field.fillRect(Math.floor((-2600 + rnd() * 5600) * A), Math.floor((-1600 + rnd() * 4000) * A), A, A);
-    }
+    // The stars are painted once on a square that repeats across the sky, rather than drawn one by one
+    // every frame (decision 61). Layers drifting at slightly different speeds hide the repeat.
+    const starField = (key: string, count: number, colours: number[], alpha: (r: number) => number, big: number, drift: number) => {
+      if (!this.textures.exists(key)) {
+        const canvas = document.createElement('canvas');
+        canvas.width = STAR_TILE;
+        canvas.height = STAR_TILE;
+        const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+        for (let i = 0; i < count; i++) {
+          const colour = colours[Math.floor(rnd() * colours.length)] as number;
+          ctx.fillStyle = `rgba(${colour >> 16},${(colour >> 8) & 255},${colour & 255},${alpha(rnd())})`;
+          const size = rnd() < big ? 2 * A : A;
+          ctx.fillRect(Math.floor(rnd() * STAR_TILE), Math.floor(rnd() * STAR_TILE), size, size);
+        }
+        this.textures.addCanvas(key, canvas);
+      }
+      return this.#inSky(this.add.tileSprite(-2600 * A, -1600 * A, 5600 * A, 4000 * A, key).setOrigin(0, 0).setScrollFactor(drift));
+    };
+    starField('stars.near', 12, stars, (r) => 0.35 + r * 0.65, 0, 0.3).setDepth(-1000000);
+    starField('stars.far', 12, stars, (r) => 0.35 + r * 0.65, 0, 0.26).setDepth(-1000000);
     if (!reduceMotion) {
       for (let i = 0; i < 24; i++) {
-        const star = this.add.rectangle(Math.floor((-900 + rnd() * 2000) * A), Math.floor((-400 + rnd() * 1400) * A), A, A, 0xffffff).setScrollFactor(0.3).setDepth(-999999);
+        const star = this.#inSky(this.add.rectangle(Math.floor((-900 + rnd() * 2000) * A), Math.floor((-400 + rnd() * 1400) * A), A, A, 0xffffff).setScrollFactor(0.3).setDepth(-999999));
         this.tweens.add({ targets: star, alpha: 0.15, duration: 900 + rnd() * 1800, yoyo: true, repeat: -1, delay: rnd() * 2000 });
       }
     }
+    // More stars come out at night, brighter than the day's (decision 62).
+    this.#nightSky = starField('stars.night', 18, stars.slice(0, 3), (r) => 0.5 + r * 0.5, 0.08, 0.33).setDepth(-999998).setAlpha(0);
+    // Mira, the star the island is named after, high in the corner of the sky, brightening and fading.
+    this.#mira = this.#inSky(this.add.image(0, 0, names.star).setDepth(-999997));
+    this.#mira.setInteractive({ useHandCursor: false });
+    this.#mira.on('pointerover', () => { this.#pointedAtMira = true; });
+    this.#mira.on('pointerout', () => { this.#pointedAtMira = false; });
+  }
+
+  // -- day, night and the seasons (decision 62) --
+
+  /** Looks at the clock: the light on the island, the lamps, who's asleep, and the season's dress. */
+  #updateSky(): void {
+    const now = this.#now();
+    const was = this.#daylight;
+    const light = daylightAt(now);
+    this.#daylight = light;
+    // The island is shaded only while the light isn't the day's, since shading costs a pass of its own.
+    const [r, g, b] = light.tint;
+    const main = this.cameras.main;
+    if (r + g + b < 2.99) {
+      this.#shade ??= main.postFX?.addColorMatrix() ?? null; // shading needs WebGL
+      this.#shade?.set([r, 0, 0, 0, 0, 0, g, 0, 0, 0, 0, 0, b, 0, 0, 0, 0, 0, 1, 0]);
+    } else if (this.#shade) {
+      main.postFX.clear();
+      this.#shade = null;
+    }
+    this.#nightSky.setAlpha(light.night);
+    this.#placeLights();
+    const star = miraStar(now);
+    const d = DPR();
+    const { top, right } = this.#options.insets();
+    this.#miraAt = { x: this.scale.width - (right + 56) * d, y: (top + 48) * d, brightness: star.brightness };
+    this.#miraSays = `Mira, a star in Cetus that brightens and fades every 332 days\n${star.rising ? `brightening, at its brightest in ${star.days} days` : `fading, ${star.days} days since its brightest`}`;
+    // At bedtime, mirlings waiting for me go to sleep; in the morning they get up and play.
+    if (light.asleep !== was.asleep) {
+      for (const col of this.#mirlings.values()) {
+        if (col.status !== 'my-turn' || col.removed) continue;
+        this.#stopActing(col);
+        this.#chill(col);
+      }
+    }
+    const season = seasonOf(now);
+    const pumpkins = halloween(now);
+    if (season !== this.#season || pumpkins !== this.#pumpkins) {
+      this.#season = season;
+      this.#pumpkins = pumpkins;
+      this.#art.dress(this, season);
+      this.#dressIsland();
+    }
+  }
+
+  /** Mira the star, in the top corner of the clear sky, a constant size on screen, as bright as it is today. */
+  #placeMira(time: number): void {
+    const cam = this.cameras.main;
+    const { x, y, brightness } = this.#miraAt;
+    const at = cam.getWorldPoint(x, y);
+    const twinkle = reduceMotion ? 1 : 0.9 + 0.1 * Math.sin(time / 700);
+    this.#mira.setPosition(at.x, at.y).setScale(((1 + brightness) * DPR()) / cam.zoom).setAlpha((0.35 + 0.65 * brightness) * twinkle);
+  }
+
+  /** At night the lamps, campfires, lit houses, workshops, libraries and jack-o'-lanterns glow. */
+  #placeLights(): void {
+    const night = this.#daylight.night;
+    const spots: Array<{ x: number; y: number; light: keyof typeof LIGHT }> = [];
+    if (night > 0.02) {
+      const art = this.#art.lights;
+      for (const cell of this.#cells.values()) {
+        if (cell.item !== 'lamp' && cell.item !== 'campfire') continue;
+        const { x, y } = this.#tileXY(cell.c, cell.r);
+        spots.push({ x: x + art[cell.item].x, y: y + art[cell.item].y, light: cell.item });
+      }
+      for (const sec of this.#sections) {
+        for (const b of sec.buildings) {
+          if (b.type === 'house' && !b.residents) continue;
+          spots.push({ x: b.x + art[b.type].x, y: b.y + art[b.type].y, light: b.type });
+        }
+      }
+      for (const v of this.#visitors) if (v.getData('light')) spots.push({ x: v.x + art.pumpkin.x, y: v.y + art.pumpkin.y, light: 'pumpkin' });
+    }
+    spots.forEach((spot, i) => {
+      const { kind, scale, strength } = LIGHT[spot.light];
+      let light = this.#lights[i];
+      if (!light) {
+        light = { img: this.#overIsland(this.add.image(0, 0, names.glow(kind)).setBlendMode(Phaser.BlendModes.ADD).setDepth(400000)), fire: false, strength, phase: Math.random() };
+        this.#lights.push(light);
+      }
+      light.fire = kind === 'fire';
+      light.strength = strength;
+      light.img.setTexture(names.glow(kind)).setPosition(spot.x, spot.y).setScale(scale * this.#art.scale).setAlpha(night * strength).setVisible(true);
+    });
+    for (const light of this.#lights.slice(spots.length)) light.img.setVisible(false);
+  }
+
+  /**
+   * What the season brings to the island: jack-o'-lanterns by the houses at Halloween, a snowman in
+   * each section in winter, and snow, leaves or blossom falling (decision 62).
+   */
+  #dressIsland(): void {
+    for (const v of this.#visitors) v.destroy();
+    this.#visitors = [];
+    this.#falling?.destroy();
+    this.#falling = null;
+    const A = this.#art.scale;
+    const free = (spot: Spot) => {
+      const cell = this.#cells.get(`${spot.c},${spot.r}`);
+      return cell && (cell.ch === 'g' || cell.ch === 'f') && !cell.item ? cell : undefined;
+    };
+    const put = (cell: Cell, kind: 'pumpkin' | 'snowman') => {
+      const { x, y } = this.#tileXY(cell.c, cell.r);
+      const img = this.add.image(x + (hash(cell.c, cell.r, 8) - 0.5) * 8 * A, y + 2 * A, names.seasonal(kind)).setOrigin(0.5, 1).setDepth(y + 2 * A).setScale(kind === 'pumpkin' ? 0.9 : 1.2);
+      if (kind === 'pumpkin') img.setData('light', true);
+      this.#visitors.push(img);
+    };
+    for (const sec of this.#sections) {
+      if (this.#pumpkins) {
+        // By about half the houses, and always the first.
+        for (const house of sec.houses.filter((h, i) => !i || hash(h.c, h.r, 11) < 0.5)) {
+          const by = house.spots.map(free).filter((c): c is Cell => Boolean(c) && !(c?.c === house.door.c && c?.r === house.door.r));
+          const cell = by[Math.floor(hash(house.c, house.r, 9) * by.length)];
+          if (cell) put(cell, 'pumpkin');
+        }
+      }
+      if (this.#season === 'winter') {
+        const { c0, r0 } = sectionOrigin(sec.i);
+        const ground = [...this.#cells.values()].filter((cell) => cell.section === sec.i && free(cell) && cell.c > c0 + 1 && cell.r > r0 + 1 && cell.c < c0 + SEC - 2 && cell.r < r0 + SEC - 2);
+        const taken = new Set(sec.buildings.flatMap((b) => b.spots.map((s) => `${s.c},${s.r}`)));
+        const open = ground.filter((cell) => !taken.has(`${cell.c},${cell.r}`));
+        const cell = open[Math.floor(hash(sec.i, 3, 10) * open.length)];
+        if (cell) put(cell, 'snowman');
+      }
+    }
+    const falls = { winter: { kind: 'snow', every: 70, speed: 14 }, autumn: { kind: 'leaf', every: 700, speed: 10 }, spring: { kind: 'petal', every: 700, speed: 8 }, summer: null } as const;
+    const fall = falls[this.#season];
+    if (!fall || reduceMotion || !this.#cells.size) return;
+    const f = this.#fit;
+    this.#falling = this.add.particles(0, 0, names.flake(fall.kind), {
+      x: { min: f.x, max: f.x + f.w },
+      y: { min: f.y, max: f.y + f.h * 0.8 },
+      lifespan: 7000,
+      frequency: fall.every,
+      speedY: { min: fall.speed * A * 0.6, max: fall.speed * A },
+      speedX: { min: -3 * A, max: fall.kind === 'snow' ? 3 * A : 8 * A },
+      rotate: fall.kind === 'snow' ? 0 : { min: -180, max: 180 },
+      scale: { min: A / 2, max: A * 0.8 },
+      // Each fades in where it starts and out before it ends, so nothing pops in or out.
+      alpha: { onEmit: () => 0, onUpdate: (_p: unknown, _k: string, t: number) => Math.sin(Math.PI * t) * 0.9 },
+    }).setDepth(300000);
   }
 
   // -- camera and input --
@@ -1360,7 +1630,8 @@ export class SkyScene extends Phaser.Scene {
 
   #onResize(size: Phaser.Structs.Size): void {
     const cam = this.cameras.main;
-    cam.setSize(size.width, size.height);
+    for (const c of [cam, this.#backCam, this.#overCam]) c.setSize(size.width, size.height);
+    this.#skyAt = -Infinity; // and Mira the star finds its corner again
     if (!this.#sections.length) return;
     const name = this.#levels[this.#zoomIdx]?.name;
     this.#computeZoomLevels();
@@ -1417,6 +1688,7 @@ export class SkyScene extends Phaser.Scene {
       this.#stopActing(col);
       if (col.status === 'my-turn') this.#chill(col);
     }
+    this.#dressIsland();
   }
 
   #setLayout(name: string, layout: SectionLayout, remember: boolean): void {

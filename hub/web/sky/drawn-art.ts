@@ -1,8 +1,8 @@
 // Placeholder pixel art, drawn in code at the detailed 2× size (decisions 14 and 25). Every
 // picture is registered under a name from art.ts, so an art pack can replace this module whole.
 
-import { MAX_LEVEL, names, WATERFALL_FRAMES, type Anchor, type Art, type Edge, type HouseStyle, type Palette, type Point } from './art.ts';
-import { MIRLING, PALETTES } from './mirling.ts';
+import { MAX_LEVEL, names, WATERFALL_FRAMES, type Anchor, type Art, type Edge, type HouseStyle, type Palette, type Point, type Season } from './art.ts';
+import { ASLEEP, MIRLING, PALETTES } from './mirling.ts';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -21,6 +21,42 @@ const C = {
 };
 
 const PAL = PALETTES;
+
+/** What the seasons change (decision 62): the grass and its flowers, the leaves, blossom in spring and snow in winter. */
+interface Dress {
+  grass: string[];
+  speck: string[];
+  lip: string;
+  tuft: [string, string];
+  flowers: string[];
+  pathSpeck: string[];
+  leaf: { edge: string; light: string; mid: string; dark: string; shine: string };
+  bloom?: string[];
+  snow?: boolean;
+  apples: boolean;
+}
+const SNOW = '#f4f8fc';
+const DRESS: Record<Season, Dress> = {
+  spring: {
+    grass: ['#57a63f', '#5cad45', '#50a03c'], speck: ['#6cc457', '#45903a', '#64ba50'], lip: C.lip, tuft: ['#3a7a2c', '#86d86a'],
+    flowers: ['#f4f1e6', '#ffd34d', '#ff9ec7', '#c8a6ff'], pathSpeck: C.dirtSpeck,
+    leaf: { edge: '#2a5e2c', light: '#72c85a', mid: '#4a9c40', dark: '#347530', shine: '#8ee070' }, bloom: ['#ffc4dc', '#fff0f5', '#ff9ec7'], apples: false,
+  },
+  summer: {
+    grass: C.grass, speck: C.grassSpeck, lip: C.lip, tuft: ['#3a7a2c', '#7fd062'], flowers: C.flowers, pathSpeck: C.dirtSpeck,
+    leaf: { edge: '#24552a', light: '#62b84f', mid: '#3f8f3a', dark: '#2d6b2b', shine: '#7fd062' }, apples: true,
+  },
+  autumn: {
+    grass: ['#7a9a3c', '#83a040', '#709238'], speck: ['#9aae4a', '#5f8530', '#d98a3a'], lip: '#5f7a2c', tuft: ['#5f7a2c', '#b8b050'],
+    flowers: ['#ffd34d', '#ff8a3d', '#c84a3a'], pathSpeck: [...C.dirtSpeck, '#d98a3a'],
+    leaf: { edge: '#6b2e14', light: '#f2b03a', mid: '#e07a2a', dark: '#b8452a', shine: '#ffd36a' }, apples: true,
+  },
+  winter: {
+    grass: ['#e6ecf3', '#edf1f6', '#dfe7f0'], speck: ['#ffffff', '#cbd6e4', '#d8e1ec'], lip: '#c3cfdf', tuft: ['#6a8a5a', '#8aa67a'],
+    flowers: ['#f4f1e6', '#b8c7ff', '#d6c2ff'], pathSpeck: [...C.dirtSpeck, '#e6ecf3', SNOW],
+    leaf: { edge: '#1b3326', light: '#4d6e55', mid: '#3a5a45', dark: '#2a4636', shine: '#5f8066' }, snow: true, apples: false,
+  },
+};
 
 // Hand-placed pixel maps; each letter is a colour from the palette passed with it.
 const MAPS = {
@@ -47,6 +83,11 @@ const MAPS = {
   },
   hammer: ['oooooo', 'oGGGHo', 'oGGGGo', 'oooooo', '..ob..', '..ob..', '..ob..', '..ob..', '..ob..', '..oo..'],
   spark: ['..y..', '.yWy.', 'yWWWy', '.yWy.', '..y..'],
+  // A jack-o'-lantern with a candle in it, and a snowman in a hat and scarf (decision 62).
+  pumpkin: ['......bb.....', '.....bg......', '..ooooooooo..', '.oOOdOOOdOOo.', 'oOOOdOOOdOOOo', 'oOYYdOOOdYYOo', 'oOOYdOOOdYOOo', 'oOOOdOYOdOOOo', 'oOYOYOYOYOYOo', '.oOYYYYYYYOo.', '..ooooooooo..'],
+  snowman: ['....oooo....', '....oKKo....', '...oKKKKo...', '..oooooooo..', '...oWWWWo...', '..oWeWWeWo..', '..oWWNNWWo..', '..oWWWWWWo..', '...oRRRRo...', '..oWWRWWWo..', '.oWWWRWbWWo.', 'oWWWWWWWWWWo', 'oWWWWWbWWWSo', 'oWWWWWWWWWSo', '.oWWWWWWWSo.', '..oooooooo..'],
+  star: ['....a....', '....a....', '....r....', '...rcr...', 'aarcWcraa', '...rcr...', '....r....', '....a....', '....a....'],
+  zzz: ['zzzz', '...z', '..z.', '.z..', 'zzzz'],
   console: {
     a: ['ooooooooooo', 'oKKKKKKKKKo', 'oKggKgggKKo', 'oKgggKKKKKo', 'oKggggKgKKo', 'oKgKKKKKKKo', 'ooooooooooo', '.oSSSSSSSo.', 'ooooooooooo'],
     b: ['ooooooooooo', 'oKKKKKKKKKo', 'oKgggKggKKo', 'oKggKgggKKo', 'oKgggggKKKo', 'oKgcKKKKKKo', 'ooooooooooo', '.oSSSSSSSo.', 'ooooooooooo'],
@@ -151,8 +192,20 @@ export function drawnArt(): Art {
   const anchors = new Map<string, Anchor>();
   let scene!: Phaser.Scene;
 
-  function canvasTex(key: string, w: number, h: number, draw: (ctx: Ctx) => void) {
-    if (scene.textures.exists(key)) return;
+  let season: Season = 'summer';
+
+  // A picture that changes with the seasons is drawn again on its own canvas, so whatever shows it
+  // changes at once; any other is drawn once.
+  function canvasTex(key: string, w: number, h: number, draw: (ctx: Ctx) => void, again = false) {
+    if (scene.textures.exists(key)) {
+      const tex = scene.textures.get(key);
+      if (!again || !(tex instanceof Phaser.Textures.CanvasTexture)) return;
+      tex.context.clearRect(0, 0, tex.width, tex.height);
+      tex.context.imageSmoothingEnabled = false;
+      draw(tex.context);
+      tex.refresh();
+      return;
+    }
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
@@ -168,7 +221,7 @@ export function drawnArt(): Art {
     });
   }
 
-  function tileTex(key: string, top: string, speckles: string[], lip: string, rnd: () => number, extra?: (ctx: Ctx) => void, sides: [string, string] = [C.sideL, C.sideR]) {
+  function tileTex(key: string, top: string, speckles: string[], lip: string, rnd: () => number, extra?: (ctx: Ctx) => void, sides: [string, string] = [C.sideL, C.sideR], again = false) {
     canvasTex(key, TW, TH + SIDE, (ctx) => {
       diamond(ctx, top, TW / 2, TH / 2, TW / 2);
       for (let i = 0; i < 22 * A * A; i++) {
@@ -187,7 +240,7 @@ export function drawnArt(): Art {
           rect(ctx, color, x, b + k, 1, 1);
         }
       }
-    });
+    }, again);
   }
 
   function building(key: string, raw: BuildingSpec) {
@@ -418,7 +471,31 @@ export function drawnArt(): Art {
     pixelMap(names.clash(1), MAPS.clash, { o: '#2a2f45', Y: '#fff7ec' });
   }
 
-  function tree(key: string, apples: boolean) {
+  /** Leaves in the season's colours, lighter towards the top left, with snow lying on top in winter. */
+  function foliage(ctx: Ctx, w: number, h: number, inside: (x: number, y: number) => boolean, rnd: () => number, slope: number) {
+    const { leaf, snow } = DRESS[season];
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (!inside(x, y)) continue;
+        const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+        const light = (x + y) / slope + rnd() * 0.12;
+        const top = snow && (!inside(x, y - 1) || !inside(x, y - 2) || (!inside(x, y - 3) && rnd() < 0.5));
+        rect(ctx, top ? (edge ? '#c3cfdf' : SNOW) : edge ? leaf.edge : light < 0.42 ? leaf.light : light < 0.72 ? leaf.mid : leaf.dark, x, y, 1, 1);
+      }
+    }
+  }
+
+  /** Bright specks over leaves: the season's shine, and blossom in spring. */
+  function specks(ctx: Ctx, w: number, h: number, inside: (x: number, y: number) => boolean, rnd: () => number, count: number) {
+    const { leaf, bloom } = DRESS[season];
+    for (let i = 0; i < count; i++) {
+      const x = Math.floor(rnd() * w);
+      const y = Math.floor(rnd() * h);
+      if (inside(x, y) && inside(x + 1, y + 1)) rect(ctx, bloom && i % 2 ? pick(bloom, rnd) : leaf.shine, x, y, 1, 1);
+    }
+  }
+
+  function tree(key: string, apples: boolean, again = false) {
     const rnd = mulberry32(apples ? 77 : 55);
     const w = 22;
     const h = 28;
@@ -428,21 +505,97 @@ export function drawnArt(): Art {
       rect(ctx, '#6b4423', 9, 16, 4, 10);
       rect(ctx, '#4f311a', 12, 16, 1, 10);
       rect(ctx, '#6b4423', 8, 25, 6, 2);
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          if (!inside(x, y)) continue;
-          const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
-          const light = (x + y) / (w + 18) + rnd() * 0.12;
-          rect(ctx, edge ? '#24552a' : light < 0.42 ? '#62b84f' : light < 0.72 ? '#3f8f3a' : '#2d6b2b', x, y, 1, 1);
-        }
-      }
-      for (let i = 0; i < 26; i++) {
+      foliage(ctx, w, h, inside, rnd, w + 18);
+      specks(ctx, w, 20, inside, rnd, DRESS[season].bloom ? 40 : 26);
+      if (apples && DRESS[season].apples) for (const [x, y] of [[7, 9], [14, 7], [12, 15], [17, 13]] as Array<[number, number]>) { rect(ctx, '#e04b3a', x, y, 2, 2); rect(ctx, '#ff8a7a', x, y, 1, 1); }
+    }, again);
+  }
+
+  function pine(again = false) {
+    const rnd = mulberry32(91);
+    canvasTex(names.item('pine'), 20, 34, (ctx) => {
+      rect(ctx, '#6b4423', 9, 26, 3, 7);
+      rect(ctx, '#4f311a', 11, 26, 1, 7);
+      rect(ctx, '#6b4423', 8, 32, 5, 2);
+      const tiers: Array<[number, number, number]> = [[1, 10, 4.5], [7, 11, 7], [13, 14, 9.4]];
+      const inside = (x: number, y: number) => tiers.some(([y0, th, hw]) => y >= y0 && y < y0 + th && Math.abs(x + 0.5 - 10) <= 0.8 + (hw * (y - y0 + 1)) / th);
+      blob(ctx, 20, 34, inside, (x, y) => {
+        const light = (x - 10) / 20 + rnd() * 0.15 + (y % 6) / 30;
+        return light < -0.05 ? '#4f9f5c' : light < 0.2 ? '#2f7a45' : '#225c36';
+      }, '#173f27');
+      // A pine keeps its needles all year: only the snow on each tier changes.
+      if (DRESS[season].snow) for (let y = 0; y < 34; y++) for (let x = 0; x < 20; x++) if (inside(x, y) && !inside(x, y - 1)) rect(ctx, SNOW, x, y, 1, 1);
+    }, again);
+  }
+
+  function shrub(again = false) {
+    const rnd = mulberry32(13 + A);
+    const blobs: Array<[number, number, number]> = [[7 * A, 5.5 * A, 5 * A], [4 * A, 7 * A, 3.5 * A], [10 * A, 7 * A, 3.5 * A]];
+    const inside = (x: number, y: number) => blobs.some(([bx, by, br]) => Math.hypot(x + 0.5 - bx, y + 0.5 - by) <= br);
+    canvasTex(names.item('shrub'), 14 * A, 11 * A, (ctx) => {
+      const w = 14 * A;
+      const h = 11 * A;
+      foliage(ctx, w, h, inside, rnd, w + h);
+      const { bloom, snow } = DRESS[season];
+      const flowers = bloom ?? (snow ? [] : ['#ff9ec7']);
+      for (let i = 0; i < (bloom ? 9 : 5) * A; i++) {
         const x = Math.floor(rnd() * w);
-        const y = Math.floor(rnd() * 20);
-        if (inside(x, y) && inside(x + 1, y + 1)) rect(ctx, '#7fd062', x, y, 1, 1);
+        const y = Math.floor(rnd() * h);
+        if (flowers.length && inside(x, y) && inside(x + A, y + A)) rect(ctx, pick(flowers, rnd), x, y, A, A);
       }
-      if (apples) for (const [x, y] of [[7, 9], [14, 7], [12, 15], [17, 13]] as Array<[number, number]>) { rect(ctx, '#e04b3a', x, y, 2, 2); rect(ctx, '#ff8a7a', x, y, 1, 1); }
-    });
+    }, again);
+  }
+
+  /** Grass, flowers and paths, in the season's colours, with snow on them in winter. */
+  function groundTiles(again = false) {
+    const d = DRESS[season];
+    const rnd = mulberry32(1234 + A);
+    const tufts = (ctx: Ctx) => {
+      for (let i = 0; i < 9; i++) {
+        let x = 0;
+        let y = 0;
+        do { x = 2 + Math.floor(rnd() * (TW - 4)); y = 2 + Math.floor(rnd() * (TH - 4)); } while (!insideTile(x, y));
+        rect(ctx, d.tuft[0], x, y, 1, 1); rect(ctx, d.tuft[1], x + 1, y - 1, 1, 1); rect(ctx, d.tuft[0], x + 2, y, 1, 1);
+      }
+    };
+    d.grass.forEach((g, i) => tileTex(names.tile(`grass${i}` as 'grass0'), g, d.speck, d.lip, rnd, tufts, undefined, again));
+    tileTex(names.tile('flowers'), d.grass[0] as string, d.speck, d.lip, rnd, (ctx) => {
+      tufts(ctx);
+      for (let i = 0; i < 5; i++) {
+        let x = 0;
+        let y = 0;
+        do { x = Math.floor(rnd() * TW); y = Math.floor(rnd() * TH); } while (!insideTile(x, y) || !insideTile(x + A, y + A));
+        rect(ctx, pick(d.flowers, rnd), x, y, 2, 2); rect(ctx, '#ffd34d', x, y, 1, 1); rect(ctx, '#2f6e27', x + 1, y + 2, 1, 1);
+      }
+    }, undefined, again);
+    const pathRnd = mulberry32(4321 + A);
+    tileTex(names.tile('path'), C.dirt, d.pathSpeck, C.dirtLip, pathRnd, (ctx) => {
+      for (let i = 0; i < 8; i++) {
+        const x = Math.floor(pathRnd() * TW);
+        const y = Math.floor(pathRnd() * TH);
+        if (insideTile(x, y) && insideTile(x + 2, y + 1)) { rect(ctx, '#c49866', x, y, 2, 1); rect(ctx, '#6e4a2a', x, y + 1, 2, 1); }
+      }
+    }, undefined, again);
+  }
+
+  // Night and the seasons (decision 62): the glow of a light, banded like the nebulae, a jack-o'-lantern,
+  // a snowman, snowflakes, leaves and petals to fall, Mira the star, and the z's of a sleeping mirling.
+  function nightAndSeasons() {
+    for (const [kind, rgb] of [['warm', '255,214,140'], ['fire', '255,150,60']] as const) {
+      canvasTex(names.glow(kind), 64, 64, (ctx) => {
+        for (const [r, a] of [[32, 0.06], [26, 0.1], [20, 0.16], [14, 0.24], [8, 0.34]] as Array<[number, number]>) {
+          ctx.fillStyle = `rgba(${rgb},${a})`;
+          for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) if (Math.hypot(x + 0.5 - 32, (y + 0.5 - 32) * 1.6) <= r) ctx.fillRect(x, y, 1, 1);
+        }
+      });
+    }
+    pixelMap(names.seasonal('pumpkin'), MAPS.pumpkin, { o: '#7a2e0b', O: '#ff8a3d', d: '#d9601f', Y: '#ffe08a', b: '#4a6b2a', g: '#6fa83a' });
+    pixelMap(names.seasonal('snowman'), MAPS.snowman, { o: '#5a6a85', W: SNOW, S: '#c3cfdf', K: '#2a2f45', e: '#1b1420', N: '#ff8a3d', R: '#e04b3a', b: '#2a2f45' });
+    canvasTex(names.flake('snow'), 2, 2, (ctx) => rect(ctx, SNOW, 0, 0, 2, 2));
+    canvasTex(names.flake('leaf'), 3, 2, (ctx) => { rect(ctx, '#e07a2a', 0, 0, 3, 2); rect(ctx, '#f2b03a', 0, 0, 1, 1); });
+    canvasTex(names.flake('petal'), 2, 2, (ctx) => { rect(ctx, '#ffc4dc', 0, 0, 2, 2); rect(ctx, '#fff0f5', 0, 0, 1, 1); });
+    pixelMap(names.star, MAPS.star, { a: '#ff8a5a', r: '#ffb38a', c: '#ffe0c8', W: '#ffffff' });
+    pixelMap(names.zzz, MAPS.zzz, { z: '#e8ecff' });
   }
 
   function isoBlock(ctx: Ctx, cx: number, gy: number, hw: number, wallH: number, left: string, right: string, top: string) {
@@ -453,26 +606,7 @@ export function drawnArt(): Art {
 
   // Build mode's plants and decorations (decision 39), from the sky mockup.
   function decorations() {
-    const shrubRnd = mulberry32(13 + A);
-    const blobs: Array<[number, number, number]> = [[7 * A, 5.5 * A, 5 * A], [4 * A, 7 * A, 3.5 * A], [10 * A, 7 * A, 3.5 * A]];
-    const inShrub = (x: number, y: number) => blobs.some(([bx, by, br]) => Math.hypot(x + 0.5 - bx, y + 0.5 - by) <= br);
-    canvasTex(names.item('shrub'), 14 * A, 11 * A, (ctx) => {
-      const w = 14 * A;
-      const h = 11 * A;
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          if (!inShrub(x, y)) continue;
-          const edge = !inShrub(x - 1, y) || !inShrub(x + 1, y) || !inShrub(x, y - 1) || !inShrub(x, y + 1);
-          const light = (x + y) / (w + h) + shrubRnd() * 0.1;
-          rect(ctx, edge ? '#24552a' : light < 0.4 ? '#62b84f' : light < 0.7 ? '#3f8f3a' : '#2d6b2b', x, y, 1, 1);
-        }
-      }
-      for (let i = 0; i < 5 * A; i++) {
-        const x = Math.floor(shrubRnd() * w);
-        const y = Math.floor(shrubRnd() * h);
-        if (inShrub(x, y) && inShrub(x + A, y + A)) rect(ctx, '#ff9ec7', x, y, A, A);
-      }
-    });
+    shrub();
 
     const bedRnd = mulberry32(31 + A);
     const hw = 12 * A;
@@ -565,18 +699,7 @@ export function drawnArt(): Art {
 
   // More to place anywhere on the island, and on its water (decision 44).
   function outdoors() {
-    const pineRnd = mulberry32(91);
-    canvasTex(names.item('pine'), 20, 34, (ctx) => {
-      rect(ctx, '#6b4423', 9, 26, 3, 7);
-      rect(ctx, '#4f311a', 11, 26, 1, 7);
-      rect(ctx, '#6b4423', 8, 32, 5, 2);
-      const tiers: Array<[number, number, number]> = [[1, 10, 4.5], [7, 11, 7], [13, 14, 9.4]];
-      const inside = (x: number, y: number) => tiers.some(([y0, th, hw]) => y >= y0 && y < y0 + th && Math.abs(x + 0.5 - 10) <= 0.8 + (hw * (y - y0 + 1)) / th);
-      blob(ctx, 20, 34, inside, (x, y) => {
-        const light = (x - 10) / 20 + pineRnd() * 0.15 + (y % 6) / 30;
-        return light < -0.05 ? '#4f9f5c' : light < 0.2 ? '#2f7a45' : '#225c36';
-      }, '#173f27');
-    });
+    pine();
 
     canvasTex(names.item('sunflowers'), 16, 24, (ctx) => {
       for (const [x, top] of [[3, 9], [8, 4], [13, 8]] as Array<[number, number]>) {
@@ -702,31 +825,7 @@ export function drawnArt(): Art {
 
   function tiles() {
     const rnd = mulberry32(1234 + A);
-    const tufts = (ctx: Ctx) => {
-      for (let i = 0; i < 9; i++) {
-        let x = 0;
-        let y = 0;
-        do { x = 2 + Math.floor(rnd() * (TW - 4)); y = 2 + Math.floor(rnd() * (TH - 4)); } while (!insideTile(x, y));
-        rect(ctx, '#3a7a2c', x, y, 1, 1); rect(ctx, '#7fd062', x + 1, y - 1, 1, 1); rect(ctx, '#3a7a2c', x + 2, y, 1, 1);
-      }
-    };
-    C.grass.forEach((g, i) => tileTex(names.tile(`grass${i}` as 'grass0'), g, C.grassSpeck, C.lip, rnd, tufts));
-    tileTex(names.tile('flowers'), C.grass[0] as string, C.grassSpeck, C.lip, rnd, (ctx) => {
-      tufts(ctx);
-      for (let i = 0; i < 5; i++) {
-        let x = 0;
-        let y = 0;
-        do { x = Math.floor(rnd() * TW); y = Math.floor(rnd() * TH); } while (!insideTile(x, y) || !insideTile(x + A, y + A));
-        rect(ctx, pick(C.flowers, rnd), x, y, 2, 2); rect(ctx, '#ffd34d', x, y, 1, 1); rect(ctx, '#2f6e27', x + 1, y + 2, 1, 1);
-      }
-    });
-    tileTex(names.tile('path'), C.dirt, C.dirtSpeck, C.dirtLip, rnd, (ctx) => {
-      for (let i = 0; i < 8; i++) {
-        const x = Math.floor(rnd() * TW);
-        const y = Math.floor(rnd() * TH);
-        if (insideTile(x, y) && insideTile(x + 2, y + 1)) { rect(ctx, '#c49866', x, y, 2, 1); rect(ctx, '#6e4a2a', x, y + 1, 2, 1); }
-      }
-    });
+    groundTiles();
     // No rim on top, so neighbouring water tiles run together into one stream or pond.
     tileTex(names.tile('water'), C.water, [C.water], C.waterRim, rnd, (ctx) => {
       for (const [x, y] of [[9, 7], [18, 5], [15, 10]] as Array<[number, number]>) rect(ctx, C.waterGlint, x * A, y * A, 2 * A, 1);
@@ -813,9 +912,11 @@ export function drawnArt(): Art {
     tile: { w: TW, h: TH, side: SIDE },
     sizes: { creature: MAPS.creature.a.length, beacon: MAPS.beacon.length, bubble: MAPS.bubble.length, thought: MAPS.thought.length },
     playground: PLAYGROUND,
+    lights: { lamp: { x: 0, y: -14 * A }, campfire: { x: 0, y: -2 * A }, house: { x: 0, y: -9 * A }, pumpkin: { x: 0, y: -3 * A }, workshop: { x: 0, y: -10 * A }, library: { x: 0, y: -10 * A } },
 
-    create(s) {
+    create(s, dressedFor) {
       scene = s;
+      season = dressedFor;
       if (scene.textures.exists(names.tile('grass0'))) return;
       tiles();
       for (const palette of Object.keys(PAL) as Palette[]) {
@@ -823,6 +924,7 @@ export function drawnArt(): Art {
           pixelMap(names.creature(palette, frame), MAPS.creature[frame], PAL[palette]);
           pixelMap(names.helper(palette, frame), MAPS.helper[frame], PAL[palette]);
         }
+        pixelMap(names.creature(palette, 'asleep'), ASLEEP, PAL[palette]);
       }
       tree(names.tree(false), false);
       tree(names.tree(true), true);
@@ -846,6 +948,18 @@ export function drawnArt(): Art {
       playground();
       ring();
       props();
+      nightAndSeasons();
+    },
+
+    dress(s, next) {
+      scene = s;
+      if (next === season) return;
+      season = next;
+      groundTiles(true);
+      tree(names.tree(false), false, true);
+      tree(names.tree(true), true, true);
+      pine(true);
+      shrub(true);
     },
 
     anchor(key) {

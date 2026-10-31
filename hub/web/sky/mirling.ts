@@ -28,3 +28,6 @@ export const MIRLING: Record<'a' | 'b', string[]> = {
     '...offo....offo...', '...oooo....oooo...',
   ],
 };
+
+/** Asleep (decision 62): standing still with its eyes shut, a line where each eye was. */
+export const ASLEEP: string[] = MIRLING.a.map((row, y) => (y === 5 ? row.replace(/[we]/g, 'y') : y === 6 ? row.replace(/e/g, 'y') : row));

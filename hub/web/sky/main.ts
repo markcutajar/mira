@@ -28,8 +28,23 @@ let building = false;
 const sideShown = () => !hud.classList.contains('folded');
 const openPanel = () => document.querySelector<HTMLElement>('.panel:not([hidden])');
 
+// The island follows the clock and the calendar, unless switched off in Settings, when it's always a
+// summer's day. ?sky=2026-12-24T22:00 shows it at another time, to try out night and the seasons; the
+// clock runs on from there (decision 62).
+const skyAt = Date.parse(new URLSearchParams(location.search).get('sky') ?? '');
+const skew = Number.isNaN(skyAt) ? 0 : skyAt - Date.now();
+const CLOCK_KEY = 'mira.clock';
+const clockOn = $<HTMLInputElement>('clock-on');
+try { clockOn.checked = localStorage.getItem(CLOCK_KEY) !== 'off'; } catch { clockOn.checked = true; }
+clockOn.addEventListener('change', () => {
+  try { localStorage.setItem(CLOCK_KEY, clockOn.checked ? 'on' : 'off'); } catch { /* for this visit only */ }
+  scene.lookAtClock();
+});
+const summerDay = () => new Date(new Date().getFullYear(), 6, 15, 12);
+
 const scene = new SkyScene({
   art: drawnArt(),
+  now: () => (clockOn.checked ? new Date(Date.now() + skew) : summerDay()),
   insets: () => ({
     top: $('hud-top').getBoundingClientRect().bottom + 8,
     bottom: window.innerHeight - $('hud-bottom').getBoundingClientRect().top,
