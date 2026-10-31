@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { hostFile } from '../src/terminal-protocol.ts';
-import { runningTerminals, stopTerminalHost } from '../src/terminals.ts';
+import { runningTerminals, stopTerminalHost, terminalUsage } from '../src/terminals.ts';
 
 const WAITS = "process.stdout.write('ready'); process.stdin.on('data', () => process.exit(0))";
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
@@ -44,10 +44,14 @@ describe('terminal host', () => {
     assert.equal(code, 0, errors);
 
     assert.deepEqual(await runningTerminals(home), ['s-1']);
+    const measured = await terminalUsage(home);
+    assert.equal(measured?.running, 1);
+    assert.ok((measured?.usage?.cpu ?? -1) >= 0 && (measured?.usage?.memory ?? 0) > 1e6);
     const { pid } = JSON.parse(readFileSync(hostFile(home), 'utf8')) as { pid: number };
     assert.equal(await stopTerminalHost(home), 1);
     for (let i = 0; i < 50 && alive(pid); i++) await sleep(100);
     assert.equal(alive(pid), false);
     assert.equal(await runningTerminals(home), null);
+    assert.equal(await terminalUsage(home), null);
   });
 });

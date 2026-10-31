@@ -10,6 +10,7 @@ import { connect, createServer, type Server, type Socket } from 'node:net';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as pty from '@lydell/node-pty';
+import { usageMeter } from './footprint.ts';
 import { endpoint, hostFile, line, onLines, PAGE_MESSAGES, type FromHost, type FromPage, type TerminalSpec, type ToHost } from './terminal-protocol.ts';
 
 interface Running {
@@ -35,6 +36,7 @@ export class TerminalHost {
   #home: string | undefined;
   #onExit: () => void;
   #idleMs: number;
+  #usage = usageMeter();
 
   constructor(options: { onExit?: () => void; idleMs?: number } = {}) {
     this.#onExit = options.onExit ?? (() => {});
@@ -99,6 +101,9 @@ export class TerminalHost {
             this.close();
             this.#onExit();
           });
+        } else if (message.type === 'usage') {
+          send({ type: 'usage', running: this.running().length, usage: this.#usage() });
+          socket.end();
         } else if (message.type === 'type' && typeof message.id === 'string' && typeof message.text === 'string') {
           send({ type: 'typed', ok: this.#type(message.id, message.text) });
           socket.end();

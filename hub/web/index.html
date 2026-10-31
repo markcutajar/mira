@@ -55,6 +55,16 @@
   .update li { display: flex; gap: 8px; font-size: 12.5px; }
   .update .warn { color: var(--failed); }
   .update-go { display: flex; gap: 6px; flex-wrap: wrap; }
+  /* What Mira costs the machine (decision 61). */
+  .footprint { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+  .footprint p { margin: 0; }
+  .footprint table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  .footprint th, .footprint td { padding: 2px 0; text-align: right; font-weight: 400; }
+  .footprint th:first-child { text-align: left; color: var(--ink); }
+  .footprint td { font-family: var(--font-data); font-size: 12px; width: 5.5em; }
+  .footprint td.hint { text-align: right; width: auto; font-family: inherit; }
+  .footprint thead th { color: var(--dim); font-size: 11px; }
+  .footprint .total th, .footprint .total td { border-top: 1px solid var(--hull-edge); padding-top: 4px; font-weight: 600; }
   .conn { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); }
   .conn::before { content: ""; width: 8px; height: 8px; background: var(--working); }
   .conn[data-state="down"]::before { background: var(--failed); }
@@ -119,8 +129,9 @@
   .row-done { border-color: transparent; background: transparent; }
   .row-item:hover .row-done, .row-done:focus-visible { border-color: var(--hull-edge); background: var(--hull); }
   .row-done:hover { color: var(--working); border-color: var(--working); }
-  /* A session calling for me glows in its status's colour until I read it. */
-  .row.unread { box-shadow: inset 2px 0 0 var(--c); animation: glow 1.6s ease-in-out infinite; }
+  /* A session calling for me glows in its status's colour until I read it, in steps: a smooth glow
+     repaints the row every frame, which cost more than the whole island (decision 61). */
+  .row.unread { box-shadow: inset 2px 0 0 var(--c); animation: glow 1.6s steps(6) infinite; }
   @keyframes glow { 50% { background: color-mix(in srgb, var(--c) 22%, transparent); } }
   .badge { margin-left: 6px; padding: 0 5px; border: 1px solid var(--hull-edge); font: 10px var(--font-data); color: var(--dim); vertical-align: 1px; }
   .badge.tree { border-color: var(--turn); color: var(--turn); }
@@ -231,6 +242,10 @@
   <label class="hold" title="Mira's own card in the middle of the screen when a session calls, with its last reply and a box to answer it, wherever you are."><input type="checkbox" id="popup-on"> Pop-up in the middle of the screen</label>
   <label class="hold" title="Flash Mira's taskbar button while you're in another window."><input type="checkbox" id="flash-on"> Flash the taskbar button</label>
   <p class="hint">The glow on the board and the red badge stay either way.</p>
+  <h2 class="eyebrow">The island</h2>
+  <label class="hold" title="Draw the island 20 times a second, not 60, while you're in another window, so it costs a third as much."><input type="checkbox" id="calm-on"> Slow it down while Mira isn't in front</label>
+  <h2 class="eyebrow">What Mira costs</h2>
+  <div class="footprint" id="footprint" aria-live="off"></div>
   <h2 class="eyebrow">Updates</h2>
   <div class="update" id="update" aria-live="polite"></div>
 </section>

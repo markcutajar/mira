@@ -11,6 +11,7 @@ import { WebSocketServer } from 'ws';
 import { CONTRACT_VERSION, MiraEvent } from '../../contracts/src/index.ts';
 import { CLASH_MS, findClashes, type Clash } from './clashes.ts';
 import type { Editor, EditorTarget } from './editor.ts';
+import { usageMeter, type FootprintReport } from './footprint.ts';
 import type { Growth } from './growth.ts';
 import { MirlingNames, type Pack } from './mirlings.ts';
 import { Permissions, summarise, type Decision } from './permissions.ts';
@@ -434,6 +435,7 @@ export function createHub(options: HubOptions) {
     if (route === 'GET /api/update') return json(res, updateStatus());
     if (route === 'POST /api/update/check') return void checkForUpdate(res);
     if (route === 'POST /api/update') return void update(req, res);
+    if (route === 'GET /api/footprint') return void footprint(res);
     if (startOf) return void startIn(req, res, decodeName(startOf));
     if (historyOf) return history(res, decodeName(historyOf), url);
     if (route === 'GET /api/stream') return stream(req, res, url);
@@ -522,6 +524,13 @@ export function createHub(options: HubOptions) {
   }
   /** Sends every page where the update stands, for when a check finishes or an update starts. */
   const announceUpdate = () => broadcast('update', updateStatus());
+
+  // What the hub and the terminal host cost the machine, for Settings while it's open (decision 61).
+  const hubUsage = usageMeter();
+  async function footprint(res: ServerResponse) {
+    const report: FootprintReport = { hub: hubUsage(), terminals: (await terminals?.usage()) ?? null };
+    json(res, report);
+  }
 
   return { server, permissions, close, announceSystems, announceUpdate };
 }

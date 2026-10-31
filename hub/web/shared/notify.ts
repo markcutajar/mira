@@ -12,6 +12,7 @@
 // Settings switch each way of calling on or off on its own: the system's notifications, the pop-up
 // and the flash (decision 59).
 
+import type { AppUsage } from '../../src/footprint-report.ts';
 import type { Story } from '../../src/sources.ts';
 import { folder, markRead, sessionLabel, type BoardSession, type PendingPrompt } from './format.ts';
 
@@ -52,6 +53,8 @@ declare global {
       onPopup?(handler: (action: PopupResult, id: string, session: string) => void): void;
       /** Takes Mira's update, closing the app and opening it again (decision 60); resolves to why not, or null. */
       update?(): Promise<string | null>;
+      /** What the app's own processes cost the machine (decision 61), measured since the last call. */
+      metrics?(): Promise<AppUsage | null>;
     };
   }
 }

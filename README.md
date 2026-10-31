@@ -20,6 +20,7 @@ Mira watches every Claude Code session on your machine and draws them as mirling
 - **Build mode** to make the island yours: plants, decorations, paths, ponds, boats, swings, slides and trampolines.
 - **Project groups**, so related repos share one section.
 - **A desktop app**: a window of its own to pin to the taskbar.
+- **Light on your machine.** Settings show what Mira costs, its CPU and memory, part by part, and the island slows down while Mira isn't in front.
 - **Updates itself.** When the repo you cloned has new commits, an Update button shows what's new, and one click pulls them, installs any new packages and restarts Mira. A copy with changes or commits of your own is left for you to pull.
 
 ![A session's story open beside the island: each turn's prompt, replies and tool calls, a subagent still running, tokens and estimated cost, and a box to message the session](docs/story.png)

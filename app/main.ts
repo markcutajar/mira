@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent, type Rectangle } from 'electron';
 import { loadConfig, QUICK_REPLIES } from '../hub/src/config.ts';
+import type { AppPart, AppUsage } from '../hub/src/footprint-report.ts';
 import { badgePng } from './badge.ts';
 import { asCard, createPopup, type PopupCard } from './popup.ts';
 
@@ -165,6 +166,7 @@ function createWindow(): BrowserWindow {
   const fromPage = (event: IpcMainEvent | IpcMainInvokeEvent) => event.sender === win.webContents;
   for (const channel of ['mira:focus', 'mira:flash', 'mira:popup', 'mira:unpop']) ipcMain.removeAllListeners(channel);
   ipcMain.removeHandler('mira:update');
+  ipcMain.removeHandler('mira:metrics');
   ipcMain.on('mira:focus', (event) => { if (fromPage(event)) forward(); });
   // When a session calls for me, the page flashes the taskbar button and puts up Mira's pop-up in the
   // middle of the screen (decision 55). Its cards answer the session from where I am (decision 57):
@@ -226,6 +228,22 @@ function createWindow(): BrowserWindow {
     const failed = await toHub('/api/update', { app: process.pid }, "This hub doesn't update itself.");
     if (!failed) setTimeout(() => app.quit(), 200);
     return failed;
+  });
+  // What the app's own processes cost the machine, for Settings (decision 61): the window's page, the
+  // pop-up's, drawing on the graphics card, and the app itself with its helpers. Each call measures the
+  // CPU used since the last, already as a share of the whole machine.
+  ipcMain.handle('mira:metrics', (event): AppUsage | null => {
+    if (!fromPage(event)) return null;
+    const page = win.webContents.getOSProcessId();
+    const parts = new Map<AppPart, { cpu: number; memory: number }>();
+    for (const m of app.getAppMetrics()) {
+      const part: AppPart = m.pid === page ? 'window' : m.type === 'Tab' ? 'popup' : m.type === 'GPU' ? 'graphics' : 'app';
+      const sum = parts.get(part) ?? { cpu: 0, memory: 0 };
+      sum.cpu += m.cpu.percentCPUUsage / 100;
+      sum.memory += m.memory.workingSetSize * 1024;
+      parts.set(part, sum);
+    }
+    return [...parts].map(([part, usage]) => ({ part, ...usage }));
   });
   ipcMain.on('mira:popup', (event, card: unknown) => {
     const valid = fromPage(event) ? asCard(card) : null;

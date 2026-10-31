@@ -7,6 +7,7 @@ import { connectLive } from '../shared/live.ts';
 import { createNotifier } from '../shared/notify.ts';
 import { createPanel, linkedSession } from '../shared/panel.ts';
 import { drawnArt } from './drawn-art.ts';
+import { createFootprint } from './footprint.ts';
 import { createPalette } from './palette.ts';
 import { SkyScene } from './scene.ts';
 import { createSettings } from './settings.ts';
@@ -81,8 +82,9 @@ const panel = createPanel({
 });
 
 // The live link only calls back once data arrives, by which time the side panel below exists.
-// Settings (decisions 59 and 60): how Mira calls for me, and its own updates.
-const settings = createSettings({ panel: $('settings'), toggle: $<HTMLButtonElement>('settings-toggle'), chip: $<HTMLButtonElement>('update-chip'), count: $('n-update'), box: $('update') });
+// Settings (decisions 59 to 61): how Mira calls for me, what it costs the machine, and its own updates.
+const footprint = createFootprint({ box: $('footprint'), calm: $<HTMLInputElement>('calm-on') });
+const settings = createSettings({ panel: $('settings'), toggle: $<HTMLButtonElement>('settings-toggle'), chip: $<HTMLButtonElement>('update-chip'), count: $('n-update'), box: $('update') }, (open) => footprint.show(open));
 
 const live = connectLive({
   hold: $<HTMLInputElement>('hold'),
@@ -256,6 +258,7 @@ if (!('Phaser' in window)) {
     scale: { mode: Phaser.Scale.NONE, width: Math.round(skyEl.clientWidth * d), height: Math.round(skyEl.clientHeight * d), zoom: 1 / d },
     scene: [scene],
   });
+  footprint.pace(game);
   window.addEventListener('resize', () => {
     const dd = DPR();
     game.scale.resize(Math.round(skyEl.clientWidth * dd), Math.round(skyEl.clientHeight * dd));
