@@ -540,20 +540,103 @@ export function drawnArt(): Art {
     }, again);
   }
 
+  // A full, round bush of seven clumps (decision 66), with the odd flower, or blossom in spring.
+  const BUSH: Array<[number, number, number]> = ([[9, 8, 5.5], [5, 10, 4], [13, 10, 4], [6.5, 6, 4], [11.5, 6, 4], [9, 11, 4.5], [9, 4.5, 3.5]] as Array<[number, number, number]>).map(([x, y, r]) => [x * A, y * A, r * A] as [number, number, number]);
+  const inBush = (x: number, y: number) => BUSH.some(([bx, by, br]) => Math.hypot(x + 0.5 - bx, y + 0.5 - by) <= br);
+
   function shrub(again = false) {
     const rnd = mulberry32(13 + A);
-    const blobs: Array<[number, number, number]> = [[7 * A, 5.5 * A, 5 * A], [4 * A, 7 * A, 3.5 * A], [10 * A, 7 * A, 3.5 * A]];
-    const inside = (x: number, y: number) => blobs.some(([bx, by, br]) => Math.hypot(x + 0.5 - bx, y + 0.5 - by) <= br);
-    canvasTex(names.item('shrub'), 14 * A, 11 * A, (ctx) => {
-      const w = 14 * A;
-      const h = 11 * A;
-      foliage(ctx, w, h, inside, rnd, w + h);
+    canvasTex(names.item('shrub'), 18 * A, 16 * A, (ctx) => {
+      const w = 18 * A;
+      const h = 16 * A;
+      foliage(ctx, w, h, inBush, rnd, w + h);
       const { bloom, snow } = DRESS[season];
       const flowers = bloom ?? (snow ? [] : ['#ff9ec7']);
-      for (let i = 0; i < (bloom ? 9 : 5) * A; i++) {
+      for (let i = 0; i < (bloom ? 12 : 6) * A; i++) {
         const x = Math.floor(rnd() * w);
         const y = Math.floor(rnd() * h);
-        if (flowers.length && inside(x, y) && inside(x + A, y + A)) rect(ctx, pick(flowers, rnd), x, y, A, A);
+        if (flowers.length && inBush(x, y) && inBush(x + A, y + A)) rect(ctx, pick(flowers, rnd), x, y, A, A);
+      }
+    }, again);
+  }
+
+  // A bush in flower (decision 66): clusters of blue, lilac and pink in spring and summer, fewer and
+  // fading in autumn, and none under winter's snow.
+  function flowerBush(again = false) {
+    const rnd = mulberry32(29 + A);
+    canvasTex(names.item('flower-bush'), 18 * A, 16 * A, (ctx) => {
+      const w = 18 * A;
+      const h = 16 * A;
+      foliage(ctx, w, h, inBush, rnd, w + h);
+      const clusters = season === 'winter' ? [] : season === 'autumn' ? ['#b89ac8', '#c89aa8'] : ['#9ec7ff', '#c8a6ff', '#ff9ec7'];
+      for (let i = 0; i < (season === 'autumn' ? 5 : 11); i++) {
+        const x = Math.floor(rnd() * w);
+        const y = Math.floor(rnd() * h);
+        if (!clusters.length || !inBush(x, y) || !inBush(x + 3 * A, y + 3 * A)) continue;
+        const colour = pick(clusters, rnd);
+        rect(ctx, shade(colour, 0.75), x, y + A, 3 * A, 2 * A);
+        rect(ctx, colour, x, y, 3 * A, 2 * A);
+        rect(ctx, '#ffffff', x + A, y, A, A);
+      }
+    }, again);
+  }
+
+  // Fences and hedges (decision 66): a picture for each way a piece can join its neighbours, so a run
+  // of them reads as one fence or one hedge. Rails and leaves run from the middle of the tile to the
+  // middle of each edge it joins at, where the neighbour's carry on.
+  const JOIN_UP = 12 * A;
+  const JOIN_ENDS: Array<[number, number, number]> = [[1, TW / 4, -TH / 4], [2, TW / 4, TH / 4], [4, -TW / 4, TH / 4], [8, -TW / 4, -TH / 4]];
+
+  function joined(kind: 'fence' | 'hedge', mask: number, again = false) {
+    const w = TW;
+    const h = TH + JOIN_UP;
+    const cx = TW / 2;
+    const gy = h - TH / 2;
+    const key = names.joined(kind, mask);
+    anchors.set(key, { ox: cx / w, oy: gy / h, height: JOIN_UP });
+    const ways = mask || 10; // alone: along its row
+    const ends = JOIN_ENDS.filter(([bit]) => ways & bit);
+    canvasTex(key, w, h, (ctx) => {
+      if (kind === 'fence') {
+        const rails = (list: typeof ends) => {
+          for (const [, dx, dy] of list) {
+            for (const up of [3 * A, 7 * A]) {
+              line(ctx, '#6b4423', cx, gy - up + A, cx + dx, gy + dy - up + A, A);
+              line(ctx, '#c48a58', cx, gy - up, cx + dx, gy + dy - up, A);
+            }
+          }
+        };
+        // The rails behind the post, the post, then the rails in front of it.
+        rails(ends.filter(([, , dy]) => dy < 0));
+        rect(ctx, '#8a5a32', cx - A, gy - 10 * A, 2 * A, 10 * A);
+        rect(ctx, '#c48a58', cx - A, gy - 10 * A, A, 10 * A);
+        rect(ctx, '#4a2e1c', cx - A, gy - 11 * A, 2 * A, A);
+        rails(ends.filter(([, , dy]) => dy > 0));
+      } else {
+        // A clipped hedge: small leafy blocks along each run, drawn from the back forward, so they
+        // close up into one block with a light top and shaded sides, under snow in winter.
+        const { leaf, snow } = DRESS[season];
+        const hw = 4 * A;
+        const tall = 7 * A;
+        const feet: Array<[number, number]> = [[cx, gy]];
+        for (const [, dx, dy] of ends) for (let t = 1 / 6; t <= 1.001; t += 1 / 6) feet.push([Math.round(cx + dx * t), Math.round(gy + dy * t)]);
+        feet.sort((a, b) => a[1] - b[1]);
+        const leafy = (base: string, x: number, y: number) => {
+          const n = noise(x * 7 + mask, y * 5);
+          return n < 0.12 ? leaf.edge : n > 0.88 ? leaf.shine : base;
+        };
+        for (const [px, py] of feet) {
+          const top = py - tall;
+          for (let x = px - hw; x < px + hw; x++) {
+            const left = x < px;
+            const edge = left ? top + Math.floor((x - (px - hw)) / 2) : top + hw / 2 - Math.floor((x - px) / 2);
+            for (let k = 0; k < tall; k++) rect(ctx, k === tall - 1 ? leaf.edge : leafy(left ? leaf.mid : leaf.dark, x, edge + k), x, edge + k, 1, 1);
+          }
+          for (let y = -hw / 2; y < hw / 2; y++) {
+            const span = hw - Math.abs(y + 0.5) * 2;
+            for (let x = Math.ceil(px - span); x < px + span; x++) rect(ctx, snow ? SNOW : leafy(leaf.light, x, top + y), x, top + y, 1, 1);
+          }
+        }
       }
     }, again);
   }
@@ -649,6 +732,8 @@ export function drawnArt(): Art {
   // Build mode's plants and decorations (decision 39), from the sky mockup.
   function decorations() {
     shrub();
+    flowerBush();
+    for (let mask = 0; mask < 16; mask++) for (const kind of ['fence', 'hedge'] as const) joined(kind, mask);
 
     const bedRnd = mulberry32(31 + A);
     const hw = 12 * A;
@@ -1003,6 +1088,8 @@ export function drawnArt(): Art {
       tree(names.tree(true), true, true);
       pine(true);
       shrub(true);
+      flowerBush(true);
+      for (let mask = 0; mask < 16; mask++) joined('hedge', mask, true);
     },
 
     anchor(key) {

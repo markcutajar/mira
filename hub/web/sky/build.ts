@@ -11,8 +11,8 @@ import { hash, SEC, sectionOrigin, templateBuildings, type BuildingType, type Ce
 export type { SectionLayout };
 
 export type ItemKind =
-  | 'tree' | 'tree-apple' | 'pine' | 'shrub' | 'flowerbed' | 'sunflowers' | 'mushrooms'
-  | 'lamp' | 'bench' | 'statue' | 'rock' | 'crates' | 'well' | 'campfire'
+  | 'tree' | 'tree-apple' | 'pine' | 'shrub' | 'flower-bush' | 'hedge' | 'flowerbed' | 'sunflowers' | 'mushrooms'
+  | 'lamp' | 'bench' | 'statue' | 'rock' | 'crates' | 'well' | 'campfire' | 'fence'
   | 'lilies' | 'boat';
 export type ItemGroup = 'Plants' | 'Decor' | 'Water';
 export const ITEMS: Record<ItemKind, { label: string; group: ItemGroup }> = {
@@ -20,6 +20,8 @@ export const ITEMS: Record<ItemKind, { label: string; group: ItemGroup }> = {
   'tree-apple': { label: 'Apple tree', group: 'Plants' },
   pine: { label: 'Pine tree', group: 'Plants' },
   shrub: { label: 'Shrub', group: 'Plants' },
+  'flower-bush': { label: 'Flowering bush', group: 'Plants' },
+  hedge: { label: 'Hedge', group: 'Plants' },
   flowerbed: { label: 'Flower bed', group: 'Plants' },
   sunflowers: { label: 'Sunflowers', group: 'Plants' },
   mushrooms: { label: 'Mushrooms', group: 'Plants' },
@@ -30,6 +32,7 @@ export const ITEMS: Record<ItemKind, { label: string; group: ItemGroup }> = {
   crates: { label: 'Crates', group: 'Decor' },
   well: { label: 'Well', group: 'Decor' },
   campfire: { label: 'Campfire', group: 'Decor' },
+  fence: { label: 'Fence', group: 'Decor' },
   lilies: { label: 'Lily pads', group: 'Water' },
   boat: { label: 'Rowing boat', group: 'Water' },
 };

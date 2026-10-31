@@ -20,7 +20,7 @@ export type { HouseStyle, Palette, Season };
 /** Ground tiles; a bridge's deck has its planks across the way it's crossed. */
 export type TileKind = 'grass0' | 'grass1' | 'grass2' | 'flowers' | 'path' | 'water' | 'deck-c' | 'deck-r';
 export type Decoration =
-  | 'pine' | 'shrub' | 'flowerbed' | 'sunflowers' | 'mushrooms'
+  | 'pine' | 'shrub' | 'flower-bush' | 'flowerbed' | 'sunflowers' | 'mushrooms'
   | 'lamp' | 'bench' | 'statue' | 'rock' | 'crates' | 'well' | 'campfire'
   | 'lilies' | 'boat';
 /** The edges of a tile's diamond: north-east and north-west at the back, south-east and south-west in front. */
@@ -42,6 +42,11 @@ export const names = {
   building: (type: 'library' | 'workshop', level: number) => `${type}.${level}`,
   /** Plants, decorations and things on the water placed in build mode (decisions 39 and 44); placed oaks and apple trees use `tree`. */
   item: (kind: Decoration) => `item.${kind}`,
+  /**
+   * A fence or a hedge on a tile, joined to the same on its neighbours (decision 66): a bit for each
+   * way it joins, north-east 1, south-east 2, south-west 4 and north-west 8. Alone, it runs along its row.
+   */
+  joined: (kind: 'fence' | 'hedge', mask: number) => `joined.${kind}.${mask}`,
   /** Where mirlings wait for me (decisions 41 and 49): the swings' frame, without its seats, the slide and the trampoline. */
   play: (kind: 'swings' | 'slide' | 'trampoline') => `play.${kind}`,
   /** A rubber ring on the pond, in two halves so the mirling sits inside it. */

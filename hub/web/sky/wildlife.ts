@@ -42,7 +42,7 @@ const MAX_BUTTERFLIES = 6;
 const MAX_FIREFLIES = 14;
 const MAX_FIRES = 8;
 const CLOUDS = 6;
-const PLANTS = new Set(['flowerbed', 'sunflowers', 'shrub']);
+const PLANTS = new Set(['flowerbed', 'sunflowers', 'shrub', 'flower-bush', 'hedge']);
 
 export class Wildlife {
   #host: WildHost;

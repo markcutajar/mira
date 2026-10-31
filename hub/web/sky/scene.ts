@@ -166,7 +166,7 @@ interface PickedPiece {
 
 // Where a placed picture stands on its tile, in art pixels below the tile's centre. Lily pads lie
 // flat on the water, under anything that floats by.
-const ITEM_DROP: Partial<Record<ItemKind, number>> = { tree: 3, 'tree-apple': 3, pine: 3, shrub: 2, lamp: 2, bench: 3, sunflowers: 2, mushrooms: 2, rock: 2, campfire: 2 };
+const ITEM_DROP: Partial<Record<ItemKind, number>> = { tree: 3, 'tree-apple': 3, pine: 3, shrub: 2, 'flower-bush': 2, lamp: 2, bench: 3, sunflowers: 2, mushrooms: 2, rock: 2, campfire: 2 };
 const FLAT = new Set<ItemKind>(['lilies']);
 const buildingIndex = (b: Building) => Number(b.id.split(':')[1]);
 
@@ -799,7 +799,10 @@ export class SkyScene extends Phaser.Scene {
         deco = this.add.image(x, y + 3 * A, names.tree(hash(cell.c, cell.r, 4) < 0.4)).setOrigin(0.5, 1).setDepth(y + 3 * A);
       }
       if (cell.item && isItem(cell.item)) {
-        const look = this.#itemLook(cell.item);
+        // A fence or hedge joins the same on the tiles beside it (decision 66).
+        const same = (c: number, r: number) => this.#cells.get(`${c},${r}`)?.item === cell.item;
+        const joins = (same(cell.c, cell.r - 1) ? 1 : 0) | (same(cell.c + 1, cell.r) ? 2 : 0) | (same(cell.c, cell.r + 1) ? 4 : 0) | (same(cell.c - 1, cell.r) ? 8 : 0);
+        const look = this.#itemLook(cell.item, joins);
         deco = this.add.image(x, y + look.drop, look.key).setOrigin(look.ox, look.oy).setDepth(look.flat ? tile.depth + 0.6 : y + look.drop);
       }
       if (deco) extra.push(deco);
@@ -1900,12 +1903,12 @@ export class SkyScene extends Phaser.Scene {
 
   // -- build mode, inside --
 
-  #itemLook(kind: ItemKind): { key: string; ox: number; oy: number; drop: number; flat: boolean } {
+  #itemLook(kind: ItemKind, joins = 0): { key: string; ox: number; oy: number; drop: number; flat: boolean } {
     const A = this.#art.scale;
     const drop = ((ITEM_DROP[kind] ?? 0) + (onWater(kind) ? WATER_DROP : 0)) * A;
     const flat = FLAT.has(kind);
     if (kind === 'tree' || kind === 'tree-apple') return { key: names.tree(kind === 'tree-apple'), ox: 0.5, oy: 1, drop, flat };
-    const key = names.item(kind as Decoration);
+    const key = kind === 'fence' || kind === 'hedge' ? names.joined(kind, joins) : names.item(kind as Decoration);
     const a = this.#art.anchor(key);
     return { key, ox: a.ox, oy: a.oy, drop, flat };
   }
