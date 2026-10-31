@@ -18,7 +18,7 @@ Mira watches every Claude Code session on your machine and draws them as mirling
 - **Stepping in.** Answer permission prompts from Mira, send a running session a message, start a new session in VS Code with your prompt typed in, carry a session on in a terminal inside the page, or open it in VS Code.
 - **Notifications** when a session needs you, fails, or finishes a long turn, and in the app a pop-up in the middle of the screen and a red badge on its taskbar button. The pop-up shows the session's last reply with a box and quick replies to answer it, or what it asks to run with Allow and Deny, so you can answer without leaving what you're in. A session calling for you glows on the board until you read it, with how long it has waited, Alt+N takes you to the next one, and you can tick any one off. Settings switch the notifications, the pop-up and the taskbar flash on or off, each on its own.
 - **Two sessions, one file.** When two live sessions edit the same file, Mira marks both and can tell each about the other before one undoes the other's work.
-- **Build mode** to make the island yours: plants and flowering bushes, hedges and fences, decorations, paths, ponds, boats, swings, slides and trampolines.
+- **Build mode** to make the island yours: plants and flowering bushes, hedges and fences, decorations, paths, ponds, boats, swings, slides and trampolines, and landmarks you earn with time and work: a windmill, a fountain, an observatory, a lighthouse and a hot-air balloon.
 - **Project groups**, so related repos share one section.
 - **A desktop app**: a window of its own to pin to the taskbar.
 - **Light on your machine.** Settings show what Mira costs, its CPU and memory, part by part, and the island slows down while Mira isn't in front.

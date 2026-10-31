@@ -1,5 +1,6 @@
 // Build mode's palette (decisions 39 and 49): choose a plant, a decoration, a play piece, a kind of
 // ground or a way to arrange things, then click the island. Every change is kept as it's made.
+// Landmarks show what they take until they're earned (decision 68).
 
 import { esc } from '../shared/format.ts';
 import { ITEMS, PIECES, type ItemGroup, type ItemKind, type PieceKind, type Tool } from './build.ts';
@@ -7,6 +8,8 @@ import { ITEMS, PIECES, type ItemGroup, type ItemKind, type PieceKind, type Tool
 export interface PaletteOptions {
   /** A picture of what a tool places, if it places something. */
   preview(tool: Tool): string | null;
+  /** What it takes to unlock a tool, while it's still locked, or null. */
+  locked?(tool: Tool): string | null;
   onTool(tool: Tool): void;
   onUndo(): void;
   onDone(): void;
@@ -23,6 +26,7 @@ const GROUPS: Array<{ name: string; tools: Array<{ tool: Tool; label: string }> 
   { name: 'Plants', tools: items('Plants') },
   { name: 'Decor', tools: items('Decor') },
   { name: 'Water', tools: items('Water') },
+  { name: 'Landmarks', tools: items('Landmarks') },
   { name: 'Play', tools: (Object.keys(PIECES) as PieceKind[]).map((tool) => ({ tool, label: PIECES[tool].label })) },
   { name: 'Ground', tools: [{ tool: 'path', label: 'Path' }, { tool: 'grass', label: 'Grass' }, { tool: 'flowers', label: 'Flowers' }, { tool: 'water', label: 'Pond' }] },
   { name: 'Arrange', tools: [{ tool: 'move', label: 'Move' }, { tool: 'restyle', label: 'Restyle' }, { tool: 'remove', label: 'Remove' }] },
@@ -37,6 +41,8 @@ export function createPalette(root: HTMLElement, options: PaletteOptions): Palet
       <header class="palette-head"><h2>Build</h2><button type="button" class="go small" data-done>Done</button></header>
       ${GROUPS.map((group) => `<section class="palette-group"><h3 class="eyebrow">${group.name}</h3><div class="tools">${group.tools.map((t) => {
         const picture = options.preview(t.tool);
+        const locked = options.locked?.(t.tool);
+        if (locked) return `<button type="button" class="tool locked" disabled title="${esc(locked)}">${picture ? `<img src="${picture}" alt="">` : ''}<span>${esc(t.label)}</span><small>${esc(locked)}</small></button>`;
         return `<button type="button" class="tool" data-tool="${t.tool}" aria-pressed="${t.tool === tool}">${picture ? `<img src="${picture}" alt="">` : ''}<span>${esc(t.label)}</span></button>`;
       }).join('')}</div></section>`).join('')}
       <p class="hint palette-hint" data-hint role="status"></p>

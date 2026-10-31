@@ -167,7 +167,10 @@ interface PickedPiece {
 
 // Where a placed picture stands on its tile, in art pixels below the tile's centre. Lily pads lie
 // flat on the water, under anything that floats by.
-const ITEM_DROP: Partial<Record<ItemKind, number>> = { tree: 3, 'tree-apple': 3, pine: 3, shrub: 2, 'flower-bush': 2, lamp: 2, bench: 3, sunflowers: 2, mushrooms: 2, rock: 2, campfire: 2 };
+const ITEM_DROP: Partial<Record<ItemKind, number>> = {
+  tree: 3, 'tree-apple': 3, pine: 3, shrub: 2, 'flower-bush': 2, lamp: 2, bench: 3, sunflowers: 2, mushrooms: 2, rock: 2, campfire: 2,
+  windmill: 2, fountain: 4, observatory: 2, lighthouse: 2, balloon: 2,
+};
 const FLAT = new Set<ItemKind>(['lilies']);
 const buildingIndex = (b: Building) => Number(b.id.split(':')[1]);
 
@@ -188,7 +191,9 @@ const SKY_EVERY_MS = 2000;
 // The side of the square of stars that repeats across the sky, in pixels.
 const STAR_TILE = 1024;
 // Glows at night: how big each light is drawn, and how strongly it shines.
-const LIGHT: Record<'lamp' | 'campfire' | 'house' | 'pumpkin' | 'workshop' | 'library', { kind: 'warm' | 'fire'; scale: number; strength: number }> = {
+const LIGHT: Record<'lamp' | 'campfire' | 'house' | 'pumpkin' | 'workshop' | 'library' | 'lighthouse' | 'observatory', { kind: 'warm' | 'fire'; scale: number; strength: number }> = {
+  lighthouse: { kind: 'warm', scale: 1.6, strength: 1 },
+  observatory: { kind: 'warm', scale: 0.5, strength: 0.45 },
   lamp: { kind: 'warm', scale: 1.1, strength: 0.9 },
   campfire: { kind: 'fire', scale: 1.4, strength: 1 },
   house: { kind: 'warm', scale: 0.9, strength: 0.55 },
@@ -222,6 +227,9 @@ export class SkyScene extends Phaser.Scene {
   #ground: Phaser.GameObjects.GameObject[] = [];
   /** Water pouring off the island's front edges, and which edge each hangs from. */
   #falls: Array<{ img: Image; edge: 'se' | 'sw' }> = [];
+  /** Windmill sails turning, and balloons bobbing on their tethers (decision 68). */
+  #sails: Image[] = [];
+  #bobbing: Array<{ img: Image; y: number; phase: number }> = [];
   #artKeys = new Set<string>();
   #selected: string | null = null;
   #selectMark!: Image;
@@ -553,6 +561,10 @@ export class SkyScene extends Phaser.Scene {
     const thoughtScale = Math.max(1, (12 * d) / (thought * zoom));
     const A = this.#art.scale;
     this.#drawSwings(time);
+    if (!reduceMotion) {
+      for (const sails of this.#sails) sails.angle += delta * 0.02;
+      for (const b of this.#bobbing) b.img.y = b.y + Math.round(Math.sin(time / 900 + b.phase) * 1.5);
+    }
     const fall = Math.floor(time / 110) % WATERFALL_FRAMES;
     for (const f of this.#falls) {
       const key = names.waterfall(f.edge, reduceMotion ? 0 : fall);
@@ -771,6 +783,8 @@ export class SkyScene extends Phaser.Scene {
     const A = this.#art.scale;
     const fresh: Image[] = [];
     this.#falls = [];
+    this.#sails = [];
+    this.#bobbing = [];
     const is = (c: number, r: number, ch: string) => this.#cells.get(`${c},${r}`)?.ch === ch;
     [...this.#cells.values()].sort((a, b) => a.c + a.r - (b.c + b.r)).forEach((cell) => {
       const { x, y } = this.#tileXY(cell.c, cell.r);
@@ -811,7 +825,14 @@ export class SkyScene extends Phaser.Scene {
         const same = (c: number, r: number) => this.#cells.get(`${c},${r}`)?.item === cell.item;
         const joins = (same(cell.c, cell.r - 1) ? 1 : 0) | (same(cell.c + 1, cell.r) ? 2 : 0) | (same(cell.c, cell.r + 1) ? 4 : 0) | (same(cell.c - 1, cell.r) ? 8 : 0);
         const look = this.#itemLook(cell.item, joins);
-        deco = this.add.image(x, y + look.drop, look.key).setOrigin(look.ox, look.oy).setDepth(look.flat ? tile.depth + 0.6 : y + look.drop);
+        deco = this.add.image(x, y + look.drop, look.key).setOrigin(look.ox, look.oy).setScale(look.scale).setDepth(look.flat ? tile.depth + 0.6 : y + look.drop);
+        if (cell.item === 'windmill') {
+          const at = this.#art.sailsAt;
+          const sails = this.add.image(x + at.x, y + look.drop + at.y, names.sails).setScale(look.scale).setDepth(y + look.drop + 0.1);
+          this.#sails.push(sails);
+          extra.push(sails);
+        }
+        if (cell.item === 'balloon') this.#bobbing.push({ img: deco, y: deco.y, phase: hash(cell.c, cell.r, 12) * 6 });
       }
       if (deco) extra.push(deco);
       this.#ground.push(...extra);
@@ -1775,9 +1796,10 @@ export class SkyScene extends Phaser.Scene {
     if (night > 0.02) {
       const art = this.#art.lights;
       for (const cell of this.#cells.values()) {
-        if (cell.item !== 'lamp' && cell.item !== 'campfire') continue;
+        const lit = cell.item as keyof typeof LIGHT | undefined;
+        if (lit !== 'lamp' && lit !== 'campfire' && lit !== 'lighthouse' && lit !== 'observatory') continue;
         const { x, y } = this.#tileXY(cell.c, cell.r);
-        spots.push({ x: x + art[cell.item].x, y: y + art[cell.item].y, light: cell.item });
+        spots.push({ x: x + art[lit].x, y: y + art[lit].y, light: lit });
       }
       for (const sec of this.#sections) {
         for (const b of sec.buildings) {
@@ -1957,14 +1979,14 @@ export class SkyScene extends Phaser.Scene {
 
   // -- build mode, inside --
 
-  #itemLook(kind: ItemKind, joins = 0): { key: string; ox: number; oy: number; drop: number; flat: boolean } {
+  #itemLook(kind: ItemKind, joins = 0): { key: string; ox: number; oy: number; drop: number; flat: boolean; scale: number } {
     const A = this.#art.scale;
     const drop = ((ITEM_DROP[kind] ?? 0) + (onWater(kind) ? WATER_DROP : 0)) * A;
     const flat = FLAT.has(kind);
-    if (kind === 'tree' || kind === 'tree-apple') return { key: names.tree(kind === 'tree-apple'), ox: 0.5, oy: 1, drop, flat };
+    if (kind === 'tree' || kind === 'tree-apple') return { key: names.tree(kind === 'tree-apple'), ox: 0.5, oy: 1, drop, flat, scale: 1 };
     const key = kind === 'fence' || kind === 'hedge' ? names.joined(kind, joins) : names.item(kind as Decoration);
     const a = this.#art.anchor(key);
-    return { key, ox: a.ox, oy: a.oy, drop, flat };
+    return { key, ox: a.ox, oy: a.oy, drop, flat, scale: ITEMS[kind].group === 'Landmarks' ? A : 1 };
   }
 
   // A layout changed: the ground is laid again and the buildings go to their places, while
@@ -2081,10 +2103,10 @@ export class SkyScene extends Phaser.Scene {
     const { tool } = this.#build;
     if (ok && isItem(tool)) {
       const look = this.#itemLook(tool);
-      this.#ghost.setTexture(look.key).setOrigin(look.ox, look.oy).setPosition(x, y + look.drop).setDepth(y + look.drop + 0.5).setVisible(true);
+      this.#ghost.setTexture(look.key).setOrigin(look.ox, look.oy).setScale(look.scale).setPosition(x, y + look.drop).setDepth(y + look.drop + 0.5).setVisible(true);
     } else if (ok && isPiece(tool)) {
       const a = this.#art.anchor(names.play(tool));
-      this.#ghost.setTexture(names.play(tool)).setOrigin(a.ox, a.oy).setPosition(x, y).setDepth(y + 0.5).setVisible(true);
+      this.#ghost.setTexture(names.play(tool)).setOrigin(a.ox, a.oy).setScale(1).setPosition(x, y).setDepth(y + 0.5).setVisible(true);
     } else {
       this.#ghost.setVisible(false);
     }

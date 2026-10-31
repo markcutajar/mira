@@ -824,6 +824,103 @@ export function drawnArt(): Art {
     }
   }
 
+  // Landmarks the island earns (decision 68): a windmill, its sails drawn apart so the scene can turn
+  // them, a fountain, a lighthouse, an observatory with its telescope out, and a hot-air balloon on a
+  // tether. Drawn a pixel to a pixel and shown at the buildings' scale, so they stand as tall as landmarks.
+  function landmarks() {
+    canvasTex(names.item('windmill'), 26, 46, (ctx) => {
+      const cx = 13;
+      for (let y = 12; y < 46; y++) {
+        const hw = Math.round(5 + (y - 12) * 0.2);
+        for (let x = cx - hw; x < cx + hw; x++) {
+          const course = y % 4 === 0 || ((x + (Math.floor(y / 4) % 2) * 3) % 6 === 0 && noise(x, y) < 0.5);
+          rect(ctx, course ? '#a89c82' : x < cx - hw / 3 ? '#e6dcc4' : '#c4b79c', x, y, 1, 1);
+        }
+      }
+      for (let y = 3; y < 13; y++) {
+        const hw = Math.round((y - 2) * 0.7) + 1;
+        for (let x = cx - hw; x < cx + hw; x++) rect(ctx, x < cx ? '#a8483a' : '#7a2e24', x, y, 1, 1);
+      }
+      rect(ctx, '#4a2e1c', cx - 2, 38, 4, 8);
+      rect(ctx, '#2a2f45', cx - 1, 24, 2, 3);
+    });
+    // Four sails round a hub, each a spar and a cloth on a lattice, a quarter turn apart.
+    canvasTex(names.sails, 37, 37, (ctx) => {
+      const c = 18;
+      const at = (k: number, u: number, v: number): [number, number] => (k === 0 ? [c + v, c - u] : k === 1 ? [c + u, c + v] : k === 2 ? [c - v, c + u] : [c - u, c - v]);
+      for (let k = 0; k < 4; k++) {
+        for (let u = 1; u <= 17; u++) rect(ctx, '#6b4423', ...at(k, u, 0), 1, 1);
+        for (let u = 3; u <= 16; u++) for (let v = 1; v <= 4; v++) rect(ctx, u % 3 === 0 || v === 4 ? '#c9bfa8' : '#f4f1e6', ...at(k, u, v), 1, 1);
+      }
+      rect(ctx, '#4a2e1c', c - 1, c - 1, 3, 3);
+    });
+    canvasTex(names.item('fountain'), 30, 25, (ctx) => {
+      const cx = 15;
+      const cy = 15;
+      for (let y = 0; y < 25; y++) {
+        for (let x = 0; x < 30; x++) {
+          const outer = ((x + 0.5 - cx) / 14) ** 2 + ((y + 0.5 - cy) / 6) ** 2 <= 1;
+          const inner = ((x + 0.5 - cx) / 11) ** 2 + ((y + 0.5 - cy) / 4.2) ** 2 <= 1;
+          const side = !outer && y > cy && ((x + 0.5 - cx) / 14) ** 2 + ((y - 3.5 - cy) / 6) ** 2 <= 1;
+          if (inner) rect(ctx, noise(x, y) < 0.08 ? '#8cc4f5' : '#3d7fd1', x, y, 1, 1);
+          else if (outer) rect(ctx, y > cy ? '#b8bac6' : '#d6d8e0', x, y, 1, 1);
+          else if (side) rect(ctx, '#9ea1ae', x, y, 1, 1);
+        }
+      }
+      rect(ctx, '#e2e4ec', cx - 1, 5, 2, 10);
+      rect(ctx, '#b8bac6', cx, 5, 1, 10);
+      rect(ctx, '#d6d8e0', cx - 3, 5, 6, 1);
+      rect(ctx, '#b8bac6', cx - 2, 6, 4, 1);
+      for (const [x, y] of [[0, 1], [0, 2], [-1, 3], [1, 3], [-4, 4], [4, 4], [-6, 6], [6, 6], [-7, 9], [7, 9], [-8, 12], [8, 12]] as Array<[number, number]>) rect(ctx, '#cfe8ff', cx + x, y, 1, 1);
+    });
+    canvasTex(names.item('lighthouse'), 18, 56, (ctx) => {
+      const cx = 9;
+      for (let y = 15; y < 56; y++) {
+        const hw = Math.round(3.5 + (y - 15) * 0.09);
+        const red = Math.floor((y - 15) / 7) % 2 === 0;
+        for (let x = cx - hw; x < cx + hw; x++) rect(ctx, red ? (x < cx ? '#e04b3a' : '#b8322a') : x < cx ? '#f4f1e6' : '#c9c8dc', x, y, 1, 1);
+      }
+      rect(ctx, '#2a2f45', cx - 6, 13, 12, 2);
+      rect(ctx, '#2a2f45', cx - 4, 6, 8, 7);
+      rect(ctx, '#ffe08a', cx - 3, 7, 6, 5);
+      rect(ctx, '#fff7c8', cx - 2, 8, 2, 2);
+      for (let y = 2; y < 6; y++) rect(ctx, '#b8322a', cx - (y - 1), y, 2 * (y - 1), 1);
+      rect(ctx, '#2a2f45', cx, 0, 1, 2);
+      rect(ctx, '#4a2e1c', cx - 1, 49, 3, 7);
+    });
+    canvasTex(names.item('observatory'), 30, 32, (ctx) => {
+      const cx = 15;
+      for (let y = 16; y < 32; y++) for (let x = 3; x < 27; x++) rect(ctx, y >= 30 ? '#9ea1ae' : x < cx ? '#e2e4ec' : '#c9cbd6', x, y, 1, 1);
+      rect(ctx, '#55658a', cx - 2, 24, 4, 6);
+      for (let y = 5; y < 17; y++) {
+        for (let x = 4; x < 27; x++) {
+          if ((x + 0.5 - cx) ** 2 + (y + 0.5 - 16) ** 2 > 121) continue;
+          rect(ctx, x >= 16 && x <= 17 ? '#2a2f45' : x < cx ? '#d6d8e0' : '#b8bac6', x, y, 1, 1);
+        }
+      }
+      line(ctx, '#55658a', 17, 10, 24, 3, 2);
+      rect(ctx, '#2a2f45', 24, 2, 2, 2);
+    });
+    canvasTex(names.item('balloon'), 28, 50, (ctx) => {
+      const stripes = ['#ff6b6b', '#ffd34d', '#6ff3ff'];
+      const inside = (x: number, y: number) => Math.hypot(x + 0.5 - 14, y + 0.5 - 13) <= 11 || (y >= 13 && y < 27 && Math.abs(x + 0.5 - 14) <= 11 - (y - 13) * 0.62);
+      for (let y = 0; y < 28; y++) {
+        for (let x = 0; x < 28; x++) {
+          if (!inside(x, y)) continue;
+          const colour = stripes[Math.floor((x - 3) / 4 + 9) % 3] as string;
+          const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+          rect(ctx, edge ? shade(colour, 0.6) : x > 16 ? shade(colour, 0.82) : colour, x, y, 1, 1);
+        }
+      }
+      line(ctx, '#4a2e1c', 9, 26, 11, 33);
+      line(ctx, '#4a2e1c', 19, 26, 17, 33);
+      rect(ctx, '#a8744a', 10, 33, 8, 5);
+      rect(ctx, '#6b4423', 10, 33, 8, 1);
+      for (let y = 38; y < 47; y += 2) rect(ctx, '#6b4423', 14, y, 1, 1);
+      rect(ctx, '#4a2e1c', 13, 47, 3, 3);
+    });
+  }
+
   // More to place anywhere on the island, and on its water (decision 44).
   function outdoors() {
     pine();
@@ -1069,7 +1166,11 @@ export function drawnArt(): Art {
     tile: { w: TW, h: TH, side: SIDE },
     sizes: { creature: MAPS.creature.a.length, beacon: MAPS.beacon.length, bubble: MAPS.bubble.length, thought: MAPS.thought.length },
     playground: PLAYGROUND,
-    lights: { lamp: { x: 0, y: -14 * A }, campfire: { x: 0, y: -2 * A }, house: { x: 0, y: -9 * A }, pumpkin: { x: 0, y: -3 * A }, workshop: { x: 0, y: -10 * A }, library: { x: 0, y: -10 * A } },
+    lights: {
+      lamp: { x: 0, y: -14 * A }, campfire: { x: 0, y: -2 * A }, house: { x: 0, y: -9 * A }, pumpkin: { x: 0, y: -3 * A }, workshop: { x: 0, y: -10 * A }, library: { x: 0, y: -10 * A },
+      lighthouse: { x: 0, y: -45 * A }, observatory: { x: 2 * A, y: -19 * A },
+    },
+    sailsAt: { x: 0, y: -36 * A },
 
     create(s, dressedFor) {
       scene = s;
@@ -1107,6 +1208,7 @@ export function drawnArt(): Art {
       props();
       nightAndSeasons();
       wildlife();
+      landmarks();
     },
 
     dress(s, next) {

@@ -22,7 +22,8 @@ export type TileKind = 'grass0' | 'grass1' | 'grass2' | 'flowers' | 'path' | 'wa
 export type Decoration =
   | 'pine' | 'shrub' | 'flower-bush' | 'flowerbed' | 'sunflowers' | 'mushrooms'
   | 'lamp' | 'bench' | 'statue' | 'rock' | 'crates' | 'well' | 'campfire'
-  | 'lilies' | 'boat';
+  | 'lilies' | 'boat'
+  | 'windmill' | 'fountain' | 'observatory' | 'lighthouse' | 'balloon';
 /** The edges of a tile's diamond: north-east and north-west at the back, south-east and south-west in front. */
 export type Edge = 'ne' | 'nw' | 'se' | 'sw';
 /** What a mirling holds while it works (decision 41): a book to read, a hammer to make, a console to run, and a crate it carries home when its turn is done (decision 64). */
@@ -83,6 +84,8 @@ export const names = {
   splash: (frame: number) => `splash.${frame}`,
   cloud: (i: number) => `cloud.${i}`,
   firefly: 'firefly',
+  /** A windmill's sails, which the scene turns about their hub (decision 68). */
+  sails: 'sails',
   /** A scrap of confetti, or a spark of a firework, drawn white for the scene to colour (decision 64). */
   confetti: 'confetti',
   /** The heart over a mirling I pet (decision 65), and the puff of dust where one I dropped lands. */
@@ -120,8 +123,10 @@ export interface Art {
    * the end of its chute; and where on a trampoline's mat each of its two jumpers stands.
    */
   readonly playground: { swings: { pivots: Point[]; rope: number }; slide: { ladder: Point; top: Point; foot: Point }; trampoline: { spots: Point[] } };
-  /** Where light shines from at night, from the ground point of a lamp, a campfire, a house, a jack-o'-lantern, a workshop and a library. */
-  readonly lights: Record<'lamp' | 'campfire' | 'house' | 'pumpkin' | 'workshop' | 'library', Point>;
+  /** Where light shines from at night, from the ground point of a lamp, a campfire, a house, a jack-o'-lantern, a workshop, a library, a lighthouse and an observatory. */
+  readonly lights: Record<'lamp' | 'campfire' | 'house' | 'pumpkin' | 'workshop' | 'library' | 'lighthouse' | 'observatory', Point>;
+  /** Where a windmill's sails turn, from its ground point, with the landmark at the buildings' scale (decision 68). */
+  readonly sailsAt: Point;
   /** Starts loading any files, for art that comes from a pack. */
   preload?(scene: Phaser.Scene): void;
   /** Makes every named texture available to the scene, dressed for the season. */

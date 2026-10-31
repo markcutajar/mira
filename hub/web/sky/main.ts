@@ -3,6 +3,7 @@
 // either side finds it on the other.
 
 import { clock, esc, markRead, projectLabel, sessionLabel, toast } from '../shared/format.ts';
+import { LANDMARKS, type Landmark, type Unlocks } from '../shared/landmarks.ts';
 import { connectLive } from '../shared/live.ts';
 import { createNotifier } from '../shared/notify.ts';
 import { createPanel, linkedSession } from '../shared/panel.ts';
@@ -75,6 +76,13 @@ const scene = new SkyScene({
 
 const palette = createPalette($('palette'), {
   preview: (tool) => scene.preview(tool),
+  locked: (tool) => {
+    if (!(tool in LANDMARKS)) return null;
+    const { need, days } = LANDMARKS[tool as Landmark];
+    const progress = unlocks?.[tool as Landmark];
+    if (progress?.at) return null;
+    return `Unlocks with ${need}${progress ? ` · ${progress.have} of ${progress.need} ${days ? 'days' : 'turns'} so far` : ''}`;
+  },
   onTool: (tool) => scene.setTool(tool),
   onUndo: () => {
     scene.undo();
@@ -100,6 +108,31 @@ const panel = createPanel({
     sidebar.render();
   },
 });
+// Landmarks (decision 68): what the hub says each has earned, looked at when the page opens and every
+// ten minutes, with a word in this browser the first time something is unlocked.
+const UNLOCKED_KEY = 'mira.unlocked';
+let unlocks: Unlocks | null = null;
+async function lookAtUnlocks() {
+  try {
+    const res = await fetch('/api/unlocks');
+    if (!res.ok) return;
+    unlocks = ((await res.json()) as { unlocks: Unlocks }).unlocks;
+  } catch {
+    return; // the hub isn't reachable: try again later
+  }
+  const earned = (Object.keys(LANDMARKS) as Landmark[]).filter((kind) => unlocks?.[kind]?.at);
+  let seen: string[] = [];
+  try { seen = JSON.parse(localStorage.getItem(UNLOCKED_KEY) ?? '[]') as string[]; } catch { /* nothing seen yet */ }
+  const fresh = earned.filter((kind) => !seen.includes(kind)).map((kind) => LANDMARKS[kind].label);
+  if (fresh.length) {
+    try { localStorage.setItem(UNLOCKED_KEY, JSON.stringify(earned)); } catch { /* said again next time */ }
+    toast(`New in Build: ${fresh.length > 1 ? `${fresh.slice(0, -1).join(', ')} and ${fresh.at(-1)}` : fresh[0]}.`);
+  }
+  if (building) palette.show(true);
+}
+void lookAtUnlocks();
+setInterval(() => void lookAtUnlocks(), 10 * 60_000);
+
 followToggle.addEventListener('click', () => scene.setFollow(followToggle.getAttribute('aria-pressed') !== 'true'));
 
 // The tour (decision 65): switched on in Settings, after three minutes without my touching Mira, with

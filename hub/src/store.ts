@@ -5,6 +5,7 @@ import { dirname } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import type { MiraEvent } from '../../contracts/src/index.ts';
 import { actFor, type Trips } from '../web/shared/acts.ts';
+import type { TurnTally } from './unlocks.ts';
 import type { SectionLayout } from './layout.ts';
 
 /** What I can rename or remove from view: a project (system) or a session. */
@@ -19,6 +20,8 @@ export class Store {
   #systems: StatementSync;
   #folders: StatementSync;
   #trips: StatementSync;
+  #turns: StatementSync;
+  #nthTurn: StatementSync;
   #names: StatementSync;
   #setName: StatementSync;
   #clearName: StatementSync;
@@ -97,6 +100,8 @@ export class Store {
     this.#reads = this.#db.prepare('SELECT session, at FROM reads');
     this.#setRead = this.#db.prepare('INSERT INTO reads (session, at) VALUES (?, ?) ON CONFLICT (session) DO UPDATE SET at = excluded.at');
     this.#pruneReads = this.#db.prepare('DELETE FROM reads WHERE at < ?');
+    this.#turns = this.#db.prepare("SELECT MIN(at) AS first, COUNT(*) AS n FROM events WHERE type = 'usage.reported'");
+    this.#nthTurn = this.#db.prepare("SELECT at FROM events WHERE type = 'usage.reported' ORDER BY at, seq LIMIT 1 OFFSET ?");
     this.#trips = this.#db.prepare("SELECT system, type, json_extract(body, '$.detail.tool') AS tool, COUNT(*) AS n FROM events WHERE at >= ? AND type IN ('tool.started', 'turn.ended') GROUP BY system, type, tool");
     this.#folders = this.#db.prepare("SELECT json_extract(body, '$.detail.cwd') AS cwd FROM events WHERE system IN (SELECT value FROM json_each(?)) AND type != 'session.moved' AND cwd IS NOT NULL GROUP BY cwd ORDER BY MAX(at) DESC LIMIT ?");
   }
@@ -139,6 +144,19 @@ export class Store {
       by.set(name, known ? { name, firstAt: firstAt < known.firstAt ? firstAt : known.firstAt, lastAt: lastAt > known.lastAt ? lastAt : known.lastAt } : { name, firstAt, lastAt });
     }
     return [...by.values()].filter((s) => s.lastAt >= at).sort((a, b) => a.firstAt.localeCompare(b.firstAt) || a.name.localeCompare(b.name));
+  }
+
+  /** Every turn counted, which the store keeps for good (decision 23): when the first was, how many, and when the nth was (decision 68). */
+  turnTally(): TurnTally {
+    const row = this.#turns.get() as { first: string | null; n: number } | undefined;
+    return {
+      first: row?.first ? String(row.first) : null,
+      turns: Number(row?.n ?? 0),
+      nthAt: (n) => {
+        const nth = this.#nthTurn.get(Math.max(0, n - 1)) as { at: string } | undefined;
+        return nth ? String(nth.at) : null;
+      },
+    };
   }
 
   /** Each system's trips since `at` (decision 67): tools started, by what they send a mirling to do, and turns ended. */

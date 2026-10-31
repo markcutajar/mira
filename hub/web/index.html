@@ -171,6 +171,11 @@
   .tool:hover { background: rgba(255, 255, 255, 0.04); }
   .tool[aria-pressed="true"] { border-color: var(--thronglet); background: rgba(255, 211, 77, 0.1); }
   .tool img { width: 30px; height: 30px; object-fit: contain; image-rendering: pixelated; flex: none; }
+  /* A landmark still to earn (decision 68). */
+  .tool.locked { flex-wrap: wrap; opacity: 0.55; cursor: default; }
+  .tool.locked:hover { background: transparent; }
+  .tool.locked img { filter: grayscale(1); }
+  .tool.locked small { flex-basis: 100%; font: 10.5px var(--font-body); color: var(--dim); }
   .palette-hint { margin: 0; min-height: 2.6em; color: var(--ink); }
   .palette-foot { display: flex; align-items: center; gap: 10px; }
   .palette-foot .hint { margin: 0; font-size: 11px; }
