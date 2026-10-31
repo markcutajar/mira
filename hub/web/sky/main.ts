@@ -23,6 +23,7 @@ const skyEl = $('sky');
 const zoomIn = $<HTMLButtonElement>('zoom-in');
 const zoomOut = $<HTMLButtonElement>('zoom-out');
 const buildToggle = $<HTMLButtonElement>('build-toggle');
+const followToggle = $<HTMLButtonElement>('follow-toggle');
 let building = false;
 
 const sideShown = () => !hud.classList.contains('folded');
@@ -69,6 +70,7 @@ const scene = new SkyScene({
       .catch(() => toast("The hub isn't reachable, so that change wasn't kept."));
   },
   onBuildHint: (text) => palette.hint(text),
+  onFollow: (on) => followToggle.setAttribute('aria-pressed', String(on)),
 });
 
 const palette = createPalette($('palette'), {
@@ -92,9 +94,34 @@ const panel = createPanel({
     scene.select(id);
     if (id) scene.reveal(id);
     else scene.showIsland(); // closing a story goes back to the whole island
+    // Follow keeps the camera on the open story's mirling (decision 65).
+    followToggle.hidden = !id;
+    if (!id) scene.setFollow(false);
     sidebar.render();
   },
 });
+followToggle.addEventListener('click', () => scene.setFollow(followToggle.getAttribute('aria-pressed') !== 'true'));
+
+// The tour (decision 65): switched on in Settings, after three minutes without my touching Mira, with
+// no story or build mode open, the camera drifts from one busy mirling to the next until I'm back.
+const TOUR_KEY = 'mira.tour';
+const TOUR_AFTER_MS = 3 * 60_000;
+const tourOn = $<HTMLInputElement>('tour-on');
+try { tourOn.checked = localStorage.getItem(TOUR_KEY) === 'on'; } catch { /* off */ }
+tourOn.addEventListener('change', () => {
+  try { localStorage.setItem(TOUR_KEY, tourOn.checked ? 'on' : 'off'); } catch { /* for this visit only */ }
+  if (!tourOn.checked) scene.stopTour();
+});
+let touched = Date.now();
+for (const type of ['pointermove', 'pointerdown', 'keydown', 'wheel']) {
+  window.addEventListener(type, () => {
+    touched = Date.now();
+    if (scene.touring) scene.stopTour();
+  }, { capture: true, passive: true });
+}
+setInterval(() => {
+  if (tourOn.checked && !scene.touring && !building && !panel.current() && Date.now() - touched > TOUR_AFTER_MS) scene.startTour();
+}, 5000);
 
 // The live link only calls back once data arrives, by which time the side panel below exists.
 // Settings (decisions 59 to 61): how Mira calls for me, what it costs the machine, and its own updates.

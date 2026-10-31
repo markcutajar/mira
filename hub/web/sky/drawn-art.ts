@@ -468,6 +468,9 @@ export function drawnArt(): Art {
     // A wooden crate, carried home at the end of a turn (decision 64).
     pixelMap(names.prop('crate'), ['oooooooo', 'oBbBbBbo', 'obooooBo', 'oBobBobo', 'obBoobBo', 'oBooooBo', 'oBbBbBbo', 'oooooooo'], { o: '#4a2e1c', B: '#c48a58', b: '#a8744a' });
     canvasTex(names.confetti, 2, 2, (ctx) => rect(ctx, '#ffffff', 0, 0, 2, 2));
+    // A heart for a mirling I pet, and dust where one I dropped lands (decision 65).
+    pixelMap(names.heart, ['.rr.rr.', 'rWRrRRr', 'rRRRRRr', '.rRRRr.', '..rRr..', '...r...'], { r: '#b8324f', R: '#ff6b8a', W: '#ffd6e0' });
+    pixelMap(names.dust, ['..dd..dd..', '.dDDddDDd.', 'dDDDDDDDDd', '.dddddddd.'], { d: '#9b8a76', D: '#c9b9a3' });
     const screen = { o: '#2a2f45', K: '#14182b', g: '#7bd389', c: '#e8fbe9', S: '#55658a' };
     pixelMap(names.prop('console.a'), MAPS.console.a, screen);
     pixelMap(names.prop('console.b'), MAPS.console.b, screen);

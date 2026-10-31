@@ -75,6 +75,9 @@ export const names = {
   firefly: 'firefly',
   /** A scrap of confetti, or a spark of a firework, drawn white for the scene to colour (decision 64). */
   confetti: 'confetti',
+  /** The heart over a mirling I pet (decision 65), and the puff of dust where one I dropped lands. */
+  heart: 'heart',
+  dust: 'dust',
   beacon: 'beacon',
   bubble: 'bubble',
   smoke: 'smoke',

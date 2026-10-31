@@ -143,6 +143,8 @@ export interface SkyOptions {
   onBuildHint?(text: string): void;
   /** The time the island shows (decision 62): the machine's clock, unless the page asks for another to try it out. */
   now?(): Date;
+  /** The camera started or stopped following the open mirling (decision 65). */
+  onFollow?(on: boolean): void;
 }
 
 /** A tile of the island as build mode sees it: whose layout it's in, and where. */
@@ -177,6 +179,8 @@ const actFor = (tool: string | null): Act => (!tool || DIRECTING.has(tool) ? 'th
 // A pause this long after a tool finishes, with no other started, is thinking.
 const THINK_AFTER_MS = 1500;
 const POND_FLOATERS = 5;
+// The tour while I'm away (decision 65): how long it watches each mirling.
+const TOUR_STOP_MS = 20_000;
 // Colours for confetti and fireworks (decision 64), from the section labels'.
 const CONFETTI = [0xffd34d, 0x6ff3ff, 0xc8a6ff, 0xff8a3d, 0xff9ec7, 0x9be36b];
 // How often the island looks at the clock, for the light, the lamps and the season (decision 62).
@@ -225,7 +229,13 @@ export class SkyScene extends Phaser.Scene {
   #levels: Array<{ name: string; zoom: number }> = [{ name: 'Everything', zoom: 1 }];
   #zoomIdx = 0;
   #filter: Phaser.Textures.FilterMode | null = null;
-  #drag: { x: number; y: number; sx: number; sy: number; moved: boolean } | null = null;
+  /** A press on the island: where it started, and the mirling under it, which a drag picks up (decision 65). */
+  #drag: { x: number; y: number; sx: number; sy: number; moved: boolean; mirling?: string } | null = null;
+  /** The mirling I've picked up, dangling from the pointer. */
+  #held: Mirling | null = null;
+  /** Whether the camera follows the open mirling, and the tour while I'm away, with the mirling it's watching (decision 65). */
+  #following = false;
+  #tour: { zoom: number; id: string | null; timer: Phaser.Time.TimerEvent | null } | null = null;
   #lastWheel = 0;
   #needsIdx = -1;
   /** How I arranged each project's section, and where its buildings stand as a result (decision 39). */
@@ -309,6 +319,51 @@ export class SkyScene extends Phaser.Scene {
     if (x > left + 40 && x < window.innerWidth - right - 40 && y > top + 40 && y < window.innerHeight - bottom - 20) return;
     const c = this.#centerFor(col.pos, cam.zoom);
     cam.pan(c.x, c.y, 400, 'Sine.easeInOut', true);
+  }
+
+  /** Keeps the camera on the open mirling as it moves, close enough to see it, or lets it go (decision 65). */
+  setFollow(on: boolean): void {
+    const col = this.#selected ? this.#mirlings.get(this.#selected) : undefined;
+    const now = on && Boolean(col);
+    if (now === this.#following) return;
+    this.#following = now;
+    if (now && col) this.focusSession(col.id);
+    this.#options.onFollow?.(now);
+  }
+
+  /** Drifts from one busy mirling to the next, as a screensaver does, until `stopTour` (decision 65). */
+  startTour(): void {
+    if (!this.#ready || this.#tour || !this.#mirlings.size) return;
+    this.#tour = { zoom: this.#zoomIdx, id: null, timer: null };
+    this.#tourOn();
+  }
+
+  /** Ends the tour, back where the camera was before it. */
+  stopTour(): void {
+    const tour = this.#tour;
+    if (!tour) return;
+    tour.timer?.remove();
+    this.#tour = null;
+    this.#setZoom(tour.zoom);
+  }
+
+  get touring(): boolean {
+    return Boolean(this.#tour);
+  }
+
+  // The next mirling worth watching: one calling for me, then one at work, then any other, never the same twice running.
+  #tourOn(): void {
+    const tour = this.#tour;
+    if (!tour) return;
+    const all = [...this.#mirlings.values()].filter((c) => !c.removed && c.id !== tour.id);
+    const rank = (c: Mirling) => (c.status === 'needs-me' ? 0 : c.status === 'working' ? 1 : c.status === 'waiting' ? 2 : 3);
+    const best = Math.min(...all.map(rank));
+    const next = all.length ? pickOne(all.filter((c) => rank(c) === best)) : this.#mirlings.get(tour.id ?? '');
+    if (next) {
+      tour.id = next.id;
+      this.focusSession(next.id);
+    }
+    tour.timer = this.time.delayedCall(TOUR_STOP_MS, () => this.#tourOn());
   }
 
   /** Flies to a session's mirling, close enough to see it; false if it has none on the island. */
@@ -480,6 +535,7 @@ export class SkyScene extends Phaser.Scene {
     }
     this.#placeMira(time);
     this.#wild.update(time, delta);
+    this.#followCamera(delta);
     for (const light of this.#lights) {
       if (!light.fire || !light.img.visible || reduceMotion) continue;
       light.img.setAlpha(this.#daylight.night * light.strength * (0.82 + 0.18 * Math.sin(time / 90 + light.phase * 7) * Math.sin(time / 230 + light.phase * 3)));
@@ -506,8 +562,15 @@ export class SkyScene extends Phaser.Scene {
     const labelled = pointed ?? (building ? undefined : selected);
     // Over a mirling's head: its name tag, or the label with its name and task while that shows; higher for a beacon.
     const overHead = (col: Mirling) => Math.round(col.pos.y) - creature - (col.marks.beacon ? 22 * d / zoom + 4 * A : 4 * A);
+    // A mirling I've picked up hangs from the pointer by its head, kicking its legs.
+    const held = this.#held;
+    if (held) {
+      const p = this.input.activePointer;
+      const at = this.cameras.main.getWorldPoint(p.x, p.y);
+      Object.assign(held.pos, { x: at.x, y: at.y + creature * 0.8 });
+    }
     for (const col of this.#mirlings.values()) {
-      const beat = Math.floor(time / 170 + col.phase * 2) % 2;
+      const beat = Math.floor(time / (col === held ? 90 : 170) + col.phase * 2) % 2;
       const key = names.creature(col.palette, col.asleep ? 'asleep' : col.moving && beat ? 'b' : 'a');
       if (col.sprite.texture.key !== key) col.sprite.setTexture(key);
       const x = Math.round(col.pos.x);
@@ -520,7 +583,7 @@ export class SkyScene extends Phaser.Scene {
         ring.front.setVisible(true).setPosition(x, y + bob).setDepth(col.pos.y + 0.1);
         y += bob + 5;
       }
-      col.sprite.setFlipX(col.facing < 0).setPosition(x, y).setDepth(col.depth ?? col.pos.y);
+      col.sprite.setFlipX(col.facing < 0).setPosition(x, y).setDepth(col.depth ?? col.pos.y).setAngle(col === held && !reduceMotion ? Math.sin(time / 140) * 10 : 0);
       col.tag.setVisible(Boolean(col.name) && col !== labelled).setScale(ui).setPosition(x, overHead(col));
       const head = y - creature;
       this.#placeGear(col, x, y, head, time, thoughtScale);
@@ -946,6 +1009,8 @@ export class SkyScene extends Phaser.Scene {
   #setStatus(col: Mirling, status: Status | null): void {
     const was = col.status;
     col.status = status;
+    // One I'm holding takes up its new status when I put it down.
+    if (col === this.#held) return;
     col.walkId += 1;
     this.tweens.killTweensOf(col.pos);
     col.moving = false;
@@ -979,6 +1044,7 @@ export class SkyScene extends Phaser.Scene {
 
   /** Goes to do what its tool calls for, or thinks on its feet when no tool is running. */
   #work(col: Mirling): void {
+    if (col === this.#held) return;
     const act = actFor(col.tool);
     const work = act === 'think' ? col.work : this.#workFor(col.sec, col.tool ?? undefined);
     if (col.act === act && col.work === work && !col.aloft) return; // already at it
@@ -1185,6 +1251,88 @@ export class SkyScene extends Phaser.Scene {
       this.#burst(b.x, b.top, 30, 'confetti');
       this.#floatAt(b.x, b.top - 8 * A, `${b.type === 'workshop' ? 'Workshop' : 'Library'} up to level ${level}`, '#9be36b');
     });
+  }
+
+  // -- playing with mirlings (decision 65) --
+
+  /** Picks a mirling up: it drops what it was doing, and leaves the playground, to dangle from the pointer. */
+  #lift(col: Mirling): void {
+    col.walkId += 1;
+    this.tweens.killTweensOf(col.pos);
+    this.#stopActing(col);
+    col.aloft = false;
+    col.moving = true;
+    col.depth = 350000;
+    this.#held = col;
+    this.input.setDefaultCursor('grabbing');
+    this.setFollow(false);
+  }
+
+  /** Lets it go: it drops onto the nearest tile it can stand on, in a puff of dust, and carries on. */
+  #drop(): void {
+    const col = this.#held;
+    if (!col) return;
+    this.#held = null;
+    this.input.setDefaultCursor('default');
+    col.moving = false;
+    const target = this.#landing(col.pos) ?? col.cell;
+    const to = this.#spotXY(target);
+    this.tweens.add({
+      targets: col.pos, x: to.x, y: to.y, duration: reduceMotion ? 1 : 260, ease: 'Quad.easeIn',
+      onComplete: () => {
+        col.depth = undefined;
+        col.cell = target;
+        if (col.removed) return;
+        if (!reduceMotion) {
+          const dust = this.add.image(to.x, to.y + 1, names.dust).setOrigin(0.5, 1).setDepth(to.y + 0.5).setScale(this.#art.scale / 2 + 0.5);
+          this.tweens.add({ targets: dust, alpha: 0, scaleX: dust.scaleX * 1.6, duration: 450, onComplete: () => dust.destroy() });
+        }
+        this.#setStatus(col, col.status); // back to what it was doing, from here
+      },
+    });
+  }
+
+  /** The tile nearest a point that a mirling can stand on, within a few tiles, or none. */
+  #landing(at: { x: number; y: number }): Spot | null {
+    const { w, h } = this.#art.tile;
+    const u = at.x / (w / 2);
+    const v = at.y / (h / 2);
+    const c0 = Math.round((u + v) / 2);
+    const r0 = Math.round((v - u) / 2);
+    for (let reach = 0; reach <= 3; reach++) {
+      let best: Spot | null = null;
+      let bestD = Infinity;
+      for (let c = c0 - reach; c <= c0 + reach; c++) {
+        for (let r = r0 - reach; r <= r0 + reach; r++) {
+          if (!this.#walkable(c, r)) continue;
+          const p = this.#tileXY(c, r);
+          const d = Math.hypot(p.x - at.x, p.y - at.y);
+          if (d < bestD) { best = { c, r }; bestD = d; }
+        }
+      }
+      if (best) return best;
+    }
+    return null;
+  }
+
+  /** A pat on the head for the mirling whose story is open: a heart, and a hop if it's standing still. */
+  #pet(col: Mirling): void {
+    if (reduceMotion) return;
+    const A = this.#art.scale;
+    const heart = this.#overIsland(this.add.image(col.pos.x + col.facing * 4 * A, col.pos.y - this.#art.sizes.creature - 2 * A, names.heart).setOrigin(0.5, 1).setDepth(500004).setScale(A * 0.75));
+    this.tweens.add({ targets: heart, y: heart.y - 12 * A, alpha: 0, scale: A * 1.1, duration: 1100, ease: 'Sine.easeOut', onComplete: () => heart.destroy() });
+    if (!col.moving && !col.aloft && col !== this.#held) this.#hop(col, { x: col.pos.x, y: col.pos.y }, () => {});
+  }
+
+  /** The camera keeps the mirling it follows, or the tour's, in the middle of the clear space. */
+  #followCamera(delta: number): void {
+    const id = this.#tour?.id ?? (this.#following ? this.#selected : null);
+    const col = id ? this.#mirlings.get(id) : undefined;
+    if (!col || col === this.#held) return;
+    const cam = this.cameras.main;
+    const c = this.#centerFor(col.pos, cam.zoom);
+    const k = Math.min(1, delta * 0.003);
+    cam.setScroll(cam.scrollX + (c.x - cam.width * 0.5 - cam.scrollX) * k, cam.scrollY + (c.y - cam.height * 0.5 - cam.scrollY) * k);
   }
 
   /** Goes home and sleeps by its door, z's rising, until morning or my reply (decision 62). */
@@ -1540,7 +1688,7 @@ export class SkyScene extends Phaser.Scene {
     // At bedtime, mirlings waiting for me go to sleep; in the morning they get up and play.
     if (light.asleep !== was.asleep) {
       for (const col of this.#mirlings.values()) {
-        if (col.status !== 'my-turn' || col.removed) continue;
+        if (col.status !== 'my-turn' || col.removed || col === this.#held) continue;
         this.#stopActing(col);
         this.#chill(col);
       }
@@ -1929,9 +2077,11 @@ export class SkyScene extends Phaser.Scene {
   #setupInput(): void {
     const cam = this.cameras.main;
     this.input.topOnly = false;
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
       cam.panEffect.reset();
-      this.#drag = { x: p.x, y: p.y, sx: cam.scrollX, sy: cam.scrollY, moved: false };
+      // Outside build mode, dragging a mirling picks it up rather than moving the camera (decision 65).
+      const mirling = this.#build.on ? undefined : over.map((o) => o.getData('session') as string | undefined).find(Boolean);
+      this.#drag = { x: p.x, y: p.y, sx: cam.scrollX, sy: cam.scrollY, moved: false, mirling };
     });
     this.input.on('gameout', () => {
       this.#cursor.setVisible(false);
@@ -1943,18 +2093,33 @@ export class SkyScene extends Phaser.Scene {
       const dx = p.x - this.#drag.x;
       const dy = p.y - this.#drag.y;
       if (Math.abs(dx) + Math.abs(dy) > 6 * DPR()) this.#drag.moved = true;
-      if (this.#drag.moved) {
-        cam.scrollX = this.#drag.sx - dx / cam.zoom;
-        cam.scrollY = this.#drag.sy - dy / cam.zoom;
+      if (!this.#drag.moved) return;
+      const picked = this.#drag.mirling ? this.#mirlings.get(this.#drag.mirling) : undefined;
+      if (picked && !picked.removed) {
+        if (this.#held !== picked) this.#lift(picked);
+        return;
       }
+      // Moving the camera myself stops it following a mirling.
+      this.setFollow(false);
+      cam.scrollX = this.#drag.sx - dx / cam.zoom;
+      cam.scrollY = this.#drag.sy - dy / cam.zoom;
+    });
+    this.input.on('pointerupoutside', () => {
+      this.#drop();
+      this.#drag = null;
     });
     this.input.on('pointerup', (p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
-      if (this.#drag && !this.#drag.moved && this.#build.on) {
+      if (this.#held) {
+        this.#drop();
+      } else if (this.#drag && !this.#drag.moved && this.#build.on) {
         this.#buildClick(p);
         this.#buildHover(p);
       } else if (this.#drag && !this.#drag.moved) {
         const id = over.map((o) => o.getData('session') as string | undefined).find(Boolean);
         const section = over.map((o) => o.getData('section') as string | undefined).find(Boolean);
+        // Clicking the mirling whose story is already open pets it.
+        const col = id ? this.#mirlings.get(id) : undefined;
+        if (col && id === this.#selected) this.#pet(col);
         if (id) this.#options.onSelect(id);
         else if (section) this.#options.onSection?.(section);
       }
