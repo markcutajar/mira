@@ -465,6 +465,9 @@ export function drawnArt(): Art {
     pixelMap(names.prop('book.b'), MAPS.book.b, book);
     pixelMap(names.prop('hammer'), MAPS.hammer, { o: '#34343c', G: '#8e8e98', H: '#d0d0d6', b: '#a8744a' });
     pixelMap(names.prop('spark'), MAPS.spark, { y: '#ffd34d', W: '#fff7ec' });
+    // A wooden crate, carried home at the end of a turn (decision 64).
+    pixelMap(names.prop('crate'), ['oooooooo', 'oBbBbBbo', 'obooooBo', 'oBobBobo', 'obBoobBo', 'oBooooBo', 'oBbBbBbo', 'oooooooo'], { o: '#4a2e1c', B: '#c48a58', b: '#a8744a' });
+    canvasTex(names.confetti, 2, 2, (ctx) => rect(ctx, '#ffffff', 0, 0, 2, 2));
     const screen = { o: '#2a2f45', K: '#14182b', g: '#7bd389', c: '#e8fbe9', S: '#55658a' };
     pixelMap(names.prop('console.a'), MAPS.console.a, screen);
     pixelMap(names.prop('console.b'), MAPS.console.b, screen);

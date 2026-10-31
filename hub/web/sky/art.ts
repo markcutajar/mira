@@ -25,8 +25,8 @@ export type Decoration =
   | 'lilies' | 'boat';
 /** The edges of a tile's diamond: north-east and north-west at the back, south-east and south-west in front. */
 export type Edge = 'ne' | 'nw' | 'se' | 'sw';
-/** What a mirling holds while it works (decision 41): a book to read, a hammer to make, a console to run. */
-export type Prop = 'book.a' | 'book.b' | 'hammer' | 'spark' | 'console.a' | 'console.b';
+/** What a mirling holds while it works (decision 41): a book to read, a hammer to make, a console to run, and a crate it carries home when its turn is done (decision 64). */
+export type Prop = 'book.a' | 'book.b' | 'hammer' | 'spark' | 'console.a' | 'console.b' | 'crate';
 export const MAX_LEVEL = 5;
 export const WATERFALL_FRAMES = 3;
 
@@ -73,6 +73,8 @@ export const names = {
   splash: (frame: number) => `splash.${frame}`,
   cloud: (i: number) => `cloud.${i}`,
   firefly: 'firefly',
+  /** A scrap of confetti, or a spark of a firework, drawn white for the scene to colour (decision 64). */
+  confetti: 'confetti',
   beacon: 'beacon',
   bubble: 'bubble',
   smoke: 'smoke',

@@ -56,8 +56,8 @@ interface Playground {
   floating: Set<Mirling>;
 }
 
-/** What a mirling does while it works: reads at the library, makes at the workshop, runs commands there, or thinks on its feet. */
-type Act = 'read' | 'make' | 'run' | 'think';
+/** What a mirling does while it works: reads at the library, makes at the workshop, runs commands there, or thinks on its feet; or carries its work home (decision 64). */
+type Act = 'read' | 'make' | 'run' | 'think' | 'carry';
 
 type Play =
   | { kind: 'swing'; frame: SwingSet; seat: number; seated: boolean; from: number; swing: { amp: number } }
@@ -177,6 +177,8 @@ const actFor = (tool: string | null): Act => (!tool || DIRECTING.has(tool) ? 'th
 // A pause this long after a tool finishes, with no other started, is thinking.
 const THINK_AFTER_MS = 1500;
 const POND_FLOATERS = 5;
+// Colours for confetti and fireworks (decision 64), from the section labels'.
+const CONFETTI = [0xffd34d, 0x6ff3ff, 0xc8a6ff, 0xff8a3d, 0xff9ec7, 0x9be36b];
 // How often the island looks at the clock, for the light, the lamps and the season (decision 62).
 const SKY_EVERY_MS = 2000;
 // The side of the square of stars that repeats across the sky, in pixels.
@@ -567,6 +569,7 @@ export class SkyScene extends Phaser.Scene {
     if (prop && col.act === 'read') prop.setTexture(names.prop(beat(700) ? 'book.b' : 'book.a')).setPosition(x + f * 7, y - 2).setDepth(depth);
     if (prop && col.act === 'run') prop.setTexture(names.prop(beat(300) ? 'console.b' : 'console.a')).setPosition(x + f * 11, y + 1).setDepth(depth);
     if (prop && col.act === 'make') prop.setPosition(x + f * 8, y - 5).setFlipX(f < 0).setAngle(f * (-65 + 85 * (swing?.t ?? 0))).setDepth(depth);
+    if (prop && col.act === 'carry') prop.setPosition(x, head + 3).setDepth(depth);
     thought?.setTexture(names.thought(reduceMotion ? 2 : Math.floor(time / 450) % 3)).setPosition(x + 6 * A, head).setScale(thoughtScale);
     // Narrower than a thought bubble, so drawn larger to read as well.
     hourglass?.setTexture(names.hourglass(reduceMotion ? 1 : Math.floor(time / 900 + col.phase * 3) % 3)).setPosition(x + 6 * A, head).setScale(thoughtScale * 1.5);
@@ -941,6 +944,7 @@ export class SkyScene extends Phaser.Scene {
   }
 
   #setStatus(col: Mirling, status: Status | null): void {
+    const was = col.status;
     col.status = status;
     col.walkId += 1;
     this.tweens.killTweensOf(col.pos);
@@ -961,8 +965,10 @@ export class SkyScene extends Phaser.Scene {
       this.#wait(col);
     } else if (status === 'my-turn') {
       // My turn: it goes to play until I reply, with a speech bubble so I know it's waiting (decision 41).
+      // A turn it worked through to the end, it cheers first and carries the work home (decision 64).
       this.#addBubble(col);
-      this.#chill(col);
+      if (was === 'working' || was === 'waiting') this.#deliver(col);
+      else this.#chill(col);
     } else {
       this.#walkTo(col, col.home.door);
     }
@@ -1096,6 +1102,89 @@ export class SkyScene extends Phaser.Scene {
       this.#stopActing(col);
       this.#chill(col);
     }));
+  }
+
+  // -- celebrating (decision 64) --
+
+  /** A turn done: two hops and a puff of confetti, then a crate carried home, and off to play. */
+  #deliver(col: Mirling): void {
+    if (reduceMotion) return this.#chill(col);
+    const at = { x: col.pos.x, y: col.pos.y };
+    const still = () => col.status === 'my-turn' && !col.removed;
+    this.#hop(col, at, () => {
+      if (!still()) return;
+      this.#burst(at.x, at.y - this.#art.sizes.creature, 12, 'confetti');
+      this.#hop(col, at, () => {
+        if (!still()) return;
+        col.act = 'carry';
+        col.gear.prop = this.add.image(col.pos.x, col.pos.y, names.prop('crate')).setOrigin(0.5, 1);
+        this.#walkTo(col, col.home.door, () => {
+          if (!still()) return;
+          const crate = col.gear.prop;
+          col.gear = {};
+          col.act = null;
+          if (crate) this.tweens.add({ targets: crate, x: col.home.x, y: col.home.y - 4 * this.#art.scale, scale: 0.5, alpha: 0, duration: 450, onComplete: () => crate.destroy() });
+          this.#chill(col);
+        });
+      });
+    });
+  }
+
+  /** A burst of coloured scraps: confetti that falls, or a firework's sparks, glowing as they fade. */
+  #burst(x: number, y: number, count: number, kind: 'confetti' | 'firework'): void {
+    if (reduceMotion) return;
+    const A = this.#art.scale;
+    const firework = kind === 'firework';
+    const burst = this.#overIsland(this.add.particles(x, y, names.confetti, {
+      speed: firework ? { min: 18 * A, max: 42 * A } : { min: 14 * A, max: 32 * A },
+      angle: firework ? { min: 0, max: 360 } : { min: 215, max: 325 },
+      gravityY: firework ? 14 * A : 70 * A,
+      lifespan: firework ? 1100 : 1300,
+      scale: { start: A / 2, end: firework ? 0.2 : A / 2 },
+      alpha: { start: 1, end: 0 },
+      tint: CONFETTI,
+      emitting: false,
+    }).setDepth(450000));
+    if (firework) burst.setBlendMode(Phaser.BlendModes.ADD);
+    burst.explode(count);
+    this.time.delayedCall(1700, () => burst.destroy());
+  }
+
+  /** A rocket from the workshop's roof, bursting over it: a new commit. */
+  #firework(x: number, y: number): void {
+    if (reduceMotion) return;
+    const A = this.#art.scale;
+    const rocket = this.#overIsland(this.add.image(x, y, names.confetti).setTint(0xffe08a).setScale(A).setDepth(450000));
+    this.tweens.add({
+      targets: rocket, y: y - 36 * A, duration: 650, ease: 'Quad.easeOut',
+      onComplete: () => {
+        rocket.destroy();
+        this.#burst(x, y - 36 * A, 28, 'firework');
+      },
+    });
+  }
+
+  /** A building going up a level: scaffolding goes up in front of it, it grows into its new size, and confetti flies. */
+  #raise(b: Building, level: number): void {
+    const A = this.#art.scale;
+    const hw = b.img.displayWidth / 2 - A;
+    const height = b.y - b.top + 2 * A;
+    const poles = this.add.graphics().setDepth(b.y + 0.5).setAlpha(0);
+    poles.lineStyle(A, 0x8a5a32, 1);
+    // Poles at the three corners I can see, and planks along both walls every few feet.
+    for (const [x, base] of [[b.x - hw, b.y - hw / 2], [b.x, b.y], [b.x + hw, b.y - hw / 2]] as Array<[number, number]>) poles.lineBetween(x, base, x, base - height);
+    poles.lineStyle(A, 0xc48a58, 1);
+    for (let k = 7 * A; k < height; k += 9 * A) {
+      poles.lineBetween(b.x - hw, b.y - hw / 2 - k, b.x, b.y - k);
+      poles.lineBetween(b.x, b.y - k, b.x + hw, b.y - hw / 2 - k);
+    }
+    this.tweens.add({ targets: poles, alpha: 1, duration: 300 });
+    this.tweens.add({ targets: b.img, scaleY: { from: 0.86, to: 1 }, duration: 2200, ease: 'Sine.easeInOut' });
+    this.time.delayedCall(2500, () => {
+      this.tweens.add({ targets: poles, alpha: 0, duration: 400, onComplete: () => poles.destroy() });
+      this.#burst(b.x, b.top, 30, 'confetti');
+      this.#floatAt(b.x, b.top - 8 * A, `${b.type === 'workshop' ? 'Workshop' : 'Library'} up to level ${level}`, '#9be36b');
+    });
   }
 
   /** Goes home and sleeps by its door, z's rising, until morning or my reply (decision 62). */
@@ -1344,9 +1433,14 @@ export class SkyScene extends Phaser.Scene {
           const grew = Boolean(last) && level > b.level;
           b.level = level;
           this.#fitBuilding(b);
-          if (grew && !reduceMotion) this.tweens.add({ targets: b.img, scaleY: { from: 1.15, to: 1 }, duration: 360, ease: 'Back.easeOut' });
+          if (grew && !reduceMotion) this.#raise(b, level);
         }
-        if (gained > 0) this.#floatAt(b.x, b.top - 4 * this.#art.scale, `+${gained} ${b.type === 'workshop' ? 'commit' : 'doc change'}${gained === 1 ? '' : 's'}`);
+        if (gained > 0) {
+          this.#floatAt(b.x, b.top - 4 * this.#art.scale, `+${gained} ${b.type === 'workshop' ? 'commit' : 'doc change'}${gained === 1 ? '' : 's'}`);
+          // A firework for each new commit, up to three, and a puff of confetti over the library for docs (decision 64).
+          if (b.type === 'library') this.#burst(b.x, b.top, 14, 'confetti');
+          else for (let i = 0; i < Math.min(gained, 3); i++) this.time.delayedCall(i * 350, () => this.#firework(b.x + rand(-6, 6) * this.#art.scale, b.top));
+        }
       }
     }
   }
