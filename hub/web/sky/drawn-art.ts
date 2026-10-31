@@ -953,6 +953,36 @@ export function drawnArt(): Art {
   function tiles() {
     const rnd = mulberry32(1234 + A);
     groundTiles();
+    // Grass worn by the mirlings' trips (decision 67): a band of earth from the middle of the tile to
+    // each edge where the track carries on, as fences join (decision 66), thicker and barer where worn.
+    const ends: Array<[number, number, number]> = [[1, TW / 4, -TH / 4], [2, TW / 4, TH / 4], [4, -TW / 4, TH / 4], [8, -TW / 4, -TH / 4]];
+    for (const level of [1, 2] as const) {
+      for (let mask = 0; mask < 16; mask++) {
+        const wearRnd = mulberry32(555 + level * 16 + mask);
+        const width = (level === 2 ? 7 : 5) * A;
+        // How far a pixel is from the track, with the tile's height doubled so the band is as wide every way.
+        const away = (x: number, y: number) => {
+          const px = x + 0.5 - TW / 2;
+          const py = (y + 0.5 - TH / 2) * 2;
+          let best = Math.hypot(px, py);
+          for (const [bit, dx, dy] of ends) {
+            if (!(mask & bit)) continue;
+            const t = Math.max(0, Math.min(1, (px * dx + py * dy * 2) / (dx * dx + dy * dy * 4)));
+            best = Math.min(best, Math.hypot(px - dx * t, py - dy * 2 * t));
+          }
+          return best;
+        };
+        canvasTex(names.wear(level, mask), TW, TH, (ctx) => {
+          for (let y = 0; y < TH; y++) {
+            for (let x = 0; x < TW; x++) {
+              if (Math.abs(x + 0.5 - TW / 2) / (TW / 2) + Math.abs(y + 0.5 - TH / 2) / (TH / 2) > 1) continue;
+              const near = 1 - away(x, y) / width;
+              if (near > 0 && wearRnd() < (level === 2 ? 1.3 : 0.7) * near) rect(ctx, wearRnd() < 0.8 ? C.dirt : pick(C.dirtSpeck, wearRnd), x, y, 1, 1);
+            }
+          }
+        });
+      }
+    }
     // No rim on top, so neighbouring water tiles run together into one stream or pond.
     tileTex(names.tile('water'), C.water, [C.water], C.waterRim, rnd, (ctx) => {
       for (const [x, y] of [[9, 7], [18, 5], [15, 10]] as Array<[number, number]>) rect(ctx, C.waterGlint, x * A, y * A, 2 * A, 1);

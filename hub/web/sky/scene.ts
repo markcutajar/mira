@@ -3,6 +3,7 @@
 // is simulated.
 
 import type { MiraEvent } from '../../../contracts/src/index.ts';
+import { actFor, READING, type ToolAct, type Trips } from '../shared/acts.ts';
 import { sessionLabel, type BoardSession } from '../shared/format.ts';
 import { ACCENT_COLOUR, ACCENTS, MAX_LEVEL, names, WATERFALL_FRAMES, type Accent, type Art, type Decoration, type Edge, type HouseStyle, type Palette } from './art.ts';
 import { arrange, BUILDING_LABEL, destinations, edit, isItem, isPiece, ITEMS, move, movePiece, onWater, pieceAt, PIECES, placeOf, restyle, sameLayouts, unreachable, type ItemKind, type Outcome, type PieceKind, type Placed, type SectionLayout, type Tool, type Where } from './build.ts';
@@ -57,7 +58,7 @@ interface Playground {
 }
 
 /** What a mirling does while it works: reads at the library, makes at the workshop, runs commands there, or thinks on its feet; or carries its work home (decision 64). */
-type Act = 'read' | 'make' | 'run' | 'think' | 'carry';
+type Act = ToolAct | 'carry';
 
 type Play =
   | { kind: 'swing'; frame: SwingSet; seat: number; seated: boolean; from: number; swing: { amp: number } }
@@ -172,10 +173,9 @@ const buildingIndex = (b: Building) => Number(b.id.split(':')[1]);
 
 // Tools that read go to the library with a book; edits are hammered out at the workshop, and other
 // commands run at a console there. Between tools, and while subagents work, a mirling thinks on its feet.
-const READING = new Set(['Read', 'Grep', 'Glob', 'LS', 'WebFetch', 'WebSearch', 'ToolSearch', 'NotebookRead']);
-const MAKING = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-const DIRECTING = new Set(['Task', 'Agent']);
-const actFor = (tool: string | null): Act => (!tool || DIRECTING.has(tool) ? 'think' : READING.has(tool) ? 'read' : MAKING.has(tool) ? 'make' : 'run');
+// How many trips across a grass tile in 30 days tread it down, and wear it to bare earth (decision 67).
+const TRODDEN = 40;
+const WORN = 160;
 // A pause this long after a tool finishes, with no other started, is thinking.
 const THINK_AFTER_MS = 1500;
 const POND_FLOATERS = 5;
@@ -210,7 +210,10 @@ export class SkyScene extends Phaser.Scene {
   #options: SkyOptions;
   #art: Art;
   #ready = false;
-  #pending: { sessions: BoardSession[]; systems: string[]; labels: Record<string, string>; growth: Record<string, SectionGrowth> } | null = null;
+  #pending: { sessions: BoardSession[]; systems: string[]; labels: Record<string, string>; growth: Record<string, SectionGrowth>; trips: Record<string, Trips> } | null = null;
+  /** Each project's trips, and the worn grass they leave along the way (decision 67). */
+  #trips = '';
+  #worn: Image[] = [];
   /** Projects I removed, taken off the island once the hub confirms they're gone. */
   #order: string[] = [];
   #sections: Section[] = [];
@@ -277,8 +280,8 @@ export class SkyScene extends Phaser.Scene {
   // -- the page's side --
 
   /** The latest sessions, the projects in the order they first appeared, and my names for them. Safe to call before the scene starts. */
-  sync(sessions: BoardSession[], systems: string[], labels: Record<string, string> = {}, growth: Record<string, SectionGrowth> = {}): void {
-    this.#pending = { sessions, systems, labels, growth };
+  sync(sessions: BoardSession[], systems: string[], labels: Record<string, string> = {}, growth: Record<string, SectionGrowth> = {}, trips: Record<string, Trips> = {}): void {
+    this.#pending = { sessions, systems, labels, growth, trips };
     if (this.#ready) this.#apply();
   }
 
@@ -681,6 +684,11 @@ export class SkyScene extends Phaser.Scene {
     if (this.#order.length !== before) this.#grow(before);
     for (const sec of this.#sections) sec.label.setText((data.labels[sec.name] ?? sec.name).toUpperCase());
     this.#applyGrowth(data.growth);
+    const trips = JSON.stringify(data.trips);
+    if (trips !== this.#trips) {
+      this.#trips = trips;
+      this.#wearPaths();
+    }
     this.#syncMirlings(data.sessions);
     this.#refreshSummaries();
   }
@@ -1715,6 +1723,51 @@ export class SkyScene extends Phaser.Scene {
     this.#mira.setPosition(at.x, at.y).setScale(((1 + brightness) * DPR()) / cam.zoom).setAlpha((0.35 + 0.65 * brightness) * twinkle);
   }
 
+  /**
+   * Grass worn by the mirlings' trips over the last 30 days (decision 67): from each house to the
+   * library for reading, to the workshop for editing and commands, and to the playground after a
+   * turn, shared between the houses, along the way they walk. A tile enough trips cross is trodden
+   * down, and one with many more is worn to bare earth. Paths, flowers and anything placed stay as they are.
+   */
+  #wearPaths(): void {
+    for (const img of this.#worn) img.destroy();
+    this.#worn = [];
+    const trips = (this.#trips ? JSON.parse(this.#trips) : {}) as Record<string, Trips>;
+    const wear = new Map<string, number>();
+    for (const sec of this.#sections) {
+      const t = trips[sec.name];
+      if (!t || !sec.houses.length) continue;
+      const library = sec.buildings.find((b) => b.type === 'library');
+      const workshop = sec.buildings.find((b) => b.type === 'workshop');
+      const play = [...sec.play.swings, ...sec.play.slides, ...sec.play.trampolines].map((p) => spotsAround(p, this.#walkable)[0]).filter((s): s is Spot => Boolean(s));
+      const routes: Array<[Spot, number]> = [];
+      if (library) routes.push([library.door, t.read]);
+      if (workshop) routes.push([workshop.door, t.make + t.run]);
+      for (const spot of play) routes.push([spot, t.turns / play.length]);
+      for (const house of sec.houses) {
+        for (const [to, count] of routes) {
+          if (count <= 0) continue;
+          for (const step of findPath(this.#walkable, house.door, to)) {
+            const key = `${step.c},${step.r}`;
+            wear.set(key, (wear.get(key) ?? 0) + count / sec.houses.length);
+          }
+        }
+      }
+    }
+    // A worn tile's track carries on to worn tiles and paths beside it.
+    const worn = (c: number, r: number) => {
+      const cell = this.#cells.get(`${c},${r}`);
+      return Boolean(cell && (cell.ch === 'p' || (cell.ch === 'g' && !cell.item && (wear.get(`${c},${r}`) ?? 0) >= TRODDEN)));
+    };
+    for (const [key, amount] of wear) {
+      const cell = this.#cells.get(key);
+      if (amount < TRODDEN || !cell || cell.ch !== 'g' || cell.item) continue;
+      const joins = (worn(cell.c, cell.r - 1) ? 1 : 0) | (worn(cell.c + 1, cell.r) ? 2 : 0) | (worn(cell.c, cell.r + 1) ? 4 : 0) | (worn(cell.c - 1, cell.r) ? 8 : 0);
+      const { x, y } = this.#tileXY(cell.c, cell.r);
+      this.#worn.push(this.add.image(x, y, names.wear(amount >= WORN ? 2 : 1, joins)).setDepth(-100000 + cell.c + cell.r + 0.5));
+    }
+  }
+
   /** At night the lamps, campfires, lit houses, workshops, libraries and jack-o'-lanterns glow. */
   #placeLights(): void {
     const night = this.#daylight.night;
@@ -1754,6 +1807,7 @@ export class SkyScene extends Phaser.Scene {
    */
   #dressIsland(): void {
     this.#wild.relayout();
+    this.#wearPaths();
     for (const v of this.#visitors) v.destroy();
     this.#visitors = [];
     this.#falling?.destroy();

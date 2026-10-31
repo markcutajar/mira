@@ -183,7 +183,8 @@ const notifier = createNotifier({
 function syncScene() {
   const labels = Object.fromEntries(live.systems.filter((s) => s.label).map((s) => [s.name, s.label as string]));
   const growth = Object.fromEntries(live.systems.filter((s) => s.growth).map((s) => [s.name, s.growth as NonNullable<typeof s.growth>]));
-  scene.sync(live.sessions, live.systems.map((s) => s.name), labels, growth);
+  const trips = Object.fromEntries(live.systems.filter((s) => s.trips).map((s) => [s.name, s.trips as NonNullable<typeof s.trips>]));
+  scene.sync(live.sessions, live.systems.map((s) => s.name), labels, growth, trips);
   $('empty').hidden = live.sessions.length > 0 || live.systems.length > 0;
 }
 

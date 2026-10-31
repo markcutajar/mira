@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import type { MiraEvent } from '../../contracts/src/index.ts';
+import { actFor, type Trips } from '../web/shared/acts.ts';
 import type { SectionLayout } from './layout.ts';
 
 /** What I can rename or remove from view: a project (system) or a session. */
@@ -17,6 +18,7 @@ export class Store {
   #sinceOfType: StatementSync;
   #systems: StatementSync;
   #folders: StatementSync;
+  #trips: StatementSync;
   #names: StatementSync;
   #setName: StatementSync;
   #clearName: StatementSync;
@@ -95,6 +97,7 @@ export class Store {
     this.#reads = this.#db.prepare('SELECT session, at FROM reads');
     this.#setRead = this.#db.prepare('INSERT INTO reads (session, at) VALUES (?, ?) ON CONFLICT (session) DO UPDATE SET at = excluded.at');
     this.#pruneReads = this.#db.prepare('DELETE FROM reads WHERE at < ?');
+    this.#trips = this.#db.prepare("SELECT system, type, json_extract(body, '$.detail.tool') AS tool, COUNT(*) AS n FROM events WHERE at >= ? AND type IN ('tool.started', 'turn.ended') GROUP BY system, type, tool");
     this.#folders = this.#db.prepare("SELECT json_extract(body, '$.detail.cwd') AS cwd FROM events WHERE system IN (SELECT value FROM json_each(?)) AND type != 'session.moved' AND cwd IS NOT NULL GROUP BY cwd ORDER BY MAX(at) DESC LIMIT ?");
   }
 
@@ -136,6 +139,21 @@ export class Store {
       by.set(name, known ? { name, firstAt: firstAt < known.firstAt ? firstAt : known.firstAt, lastAt: lastAt > known.lastAt ? lastAt : known.lastAt } : { name, firstAt, lastAt });
     }
     return [...by.values()].filter((s) => s.lastAt >= at).sort((a, b) => a.firstAt.localeCompare(b.firstAt) || a.name.localeCompare(b.name));
+  }
+
+  /** Each system's trips since `at` (decision 67): tools started, by what they send a mirling to do, and turns ended. */
+  trips(at: string): Record<string, Trips> {
+    const by: Record<string, Trips> = {};
+    for (const row of this.#trips.all(at)) {
+      const trips = (by[this.#systemOf(String(row.system))] ??= { read: 0, make: 0, run: 0, turns: 0 });
+      const n = Number(row.n);
+      if (row.type === 'turn.ended') trips.turns += n;
+      else {
+        const act = actFor(row.tool === null ? null : String(row.tool));
+        if (act !== 'think') trips[act] += n;
+      }
+    }
+    return by;
   }
 
   /** The working folders a system's events have named, most recently used first. */

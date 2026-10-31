@@ -32,6 +32,11 @@ export const WATERFALL_FRAMES = 3;
 
 export const names = {
   tile: (kind: TileKind) => `tile.${kind}`,
+  /**
+   * Grass worn by the mirlings' trips (decision 67), laid over a grass tile: trodden down, or worn to
+   * bare earth, along a track to each edge it carries on at, by the same bits as `joined`.
+   */
+  wear: (level: 1 | 2, mask: number) => `wear.${level}.${mask}`,
   /** A bridge's rail along one edge of its tile; the back ones stand behind a mirling crossing, the front ones before it. */
   rail: (edge: Edge) => `rail.${edge}`,
   /** Water pouring off the island where a stream reaches a front edge, hung from that edge of its tile. */
