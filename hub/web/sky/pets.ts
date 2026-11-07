@@ -132,6 +132,9 @@ export class Pets {
   }
 
   #next(pet: Pet): void {
+    // Whatever it did last is over: drop its timers, a nap's z's among them, or every nap would add more.
+    for (const thing of pet.later) thing.remove();
+    pet.later = [];
     const again = (ms: number) => this.#later(pet, ms, () => this.#next(pet));
     if (this.#asleep) {
       // Bedtime: home, and curled up until morning.
