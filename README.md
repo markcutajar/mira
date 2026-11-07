@@ -18,7 +18,7 @@ Mira watches every Claude Code session on your machine and draws them as mirling
 - **Stepping in.** Answer permission prompts from Mira, send a running session a message, start a new session in VS Code with your prompt typed in, carry a session on in a terminal inside the page, or open it in VS Code.
 - **Notifications** when a session needs you, fails, or finishes a long turn, and in the app a pop-up in the middle of the screen and a red badge on its taskbar button. The pop-up shows the session's last reply with a box and quick replies to answer it, or what it asks to run with Allow and Deny, so you can answer without leaving what you're in. A session calling for you glows on the board until you read it, with how long it has waited, Alt+N takes you to the next one, and you can tick any one off. Settings switch the notifications, the pop-up and the taskbar flash on or off, each on its own, and add a chime if you'd like one.
 - **Two sessions, one file.** When two live sessions edit the same file, Mira marks both and can tell each about the other before one undoes the other's work.
-- **Build mode** to make the island yours: plants and flowering bushes, hedges and fences, decorations, paths, ponds, boats, swings, slides and trampolines, dogs, cats and capybaras that wander about, and landmarks you earn with time and work: a windmill, a fountain, an observatory, a lighthouse and a hot-air balloon.
+- **[Build mode](#making-the-island-yours)** to make the island yours: plants and flowering bushes, hedges and fences, decorations, paths, ponds, boats, swings, slides and trampolines, dogs, cats and capybaras that wander about, and landmarks you earn with time and work: a windmill, a fountain, an observatory, a lighthouse and a hot-air balloon.
 - **Project groups**, so related repos share one section.
 - **A desktop app**: a window of its own to pin to the taskbar.
 - **Light on your machine.** Settings show what Mira costs, its CPU and memory, part by part, and the island slows down while Mira isn't in front.
@@ -43,6 +43,24 @@ npm run app      # optional: Mira in a window of its own
 ```
 
 Then add Mira's hooks to your Claude Code user settings, `~/.claude/settings.json`, so every repo reports without committing anything. [hub/README.md](hub/README.md) has the hooks, the settings in `~/.mira/config.json`, running the hub in the background, and the rest of what the hub does. The event contract is in [contracts/](contracts/README.md).
+
+## Making the island yours
+
+The island is yours to arrange. Press **Build** at the bottom right of the page, and a palette opens beside the island.
+
+![Build mode open beside the island: a palette of plants, decorations, landmarks and more, with a dog, a cat and a capybara wandering a section with flowering bushes, a trampoline and tracks worn into the grass](docs/build.png)
+
+1. **Pick something** from the palette: Plants, Decor, Water, Landmarks, Animals, Play or Ground.
+2. **Click a tile** to place it. It stays picked, so keep clicking to place more. Fences and hedges join up with their neighbours.
+3. **Change what's there** with Arrange: Move a building or a play piece by clicking it and then a free tile, Restyle a house, or Remove anything you've placed, the trees that were already there, or an animal, wherever it has wandered.
+4. **Press Done**, or Escape, when you're finished. Changes are saved as you make them, and Undo takes them back.
+
+Scroll or use − and + at the bottom right to zoom in, and drag to move around.
+
+- You can build anywhere on the island: a project's own ground, its shore, the coast and the stream banks. Boats and lily pads go on the water, Pond digs a new pond, and path, grass or flowers fill one back in.
+- Workshops, libraries and houses stand for real work, so you can move them but never add or remove them.
+- Mira turns down a change that would leave a building or a play piece with no way in, and says why.
+- Landmarks are earned. The palette greys out the ones you haven't reached yet and shows how far along you are.
 
 ## Other agents
 
